@@ -225,6 +225,9 @@ Compiled outputs:
 
 ---
 
-## 11. License
+## 11. License & Legal
 
 This project is licensed under the [GNU General Public License v3.0 (GPL-3.0)](LICENSE).
+
+- **© 2026 Pratama Putra. All rights reserved.**
+- **Not affiliated with Apple Inc.** Apple and Apple Music are trademarks of Apple Inc., registered in the U.S. and other countries and regions.
