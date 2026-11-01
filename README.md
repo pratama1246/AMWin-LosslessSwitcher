@@ -155,7 +155,7 @@ LosslessSwitcher-AM requests track-related metadata from public Apple services, 
 
 This README does not make a zero-telemetry claim. That claim should only be added after the application source and its dependencies have been audited for analytics, telemetry, crash reporting, and other outbound data.
 
-## Acknowledgments
+## Acknowledgments & Special Thanks
 
 - [Jordan Gibson — WindowsLosslessSwitcher](https://github.com/jordanmgibson/WindowsLosslessSwitcher), for the Windows project concept and inspiration.
 - [Vincent Neo — LosslessSwitcher](https://github.com/vincentneo/LosslessSwitcher), for pioneering automatic Apple Music sample rate switching on macOS.
