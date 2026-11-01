@@ -4,12 +4,8 @@
   <p><b>Automated Audio DAC Sample Rate Synchronizer for Apple Music on Windows 64-bit</b></p>
   <p><i>Synchronizes external DAC clock frequencies and container bit depths with active Apple Music Lossless and Hi-Res Lossless streams.</i></p>
 
-  [![Version](https://img.shields.io/badge/version-0.1.0-blue.svg)](Cargo.toml)
   [![Platform](https://img.shields.io/badge/platform-Windows%2010%20%7C%2011%20x64-0078D6.svg)](https://microsoft.com/windows)
-  [![Language](https://img.shields.io/badge/language-Rust%202024%20(MSVC)-DEA584.svg)](https://www.rust-lang.org/)
-  [![GUI](https://img.shields.io/badge/UI-Native%20Win32%20GDI-4CAF50.svg)](#)
-  [![DPI Awareness](https://img.shields.io/badge/DPI-Per--Monitor%20V2-orange.svg)](#)
-  [![Memory](https://img.shields.io/badge/memory-%3C%208%20MB%20RAM-success.svg)](#)
+  [![Language](https://img.shields.io/badge/language-Rust-DEA584.svg)](https://www.rust-lang.org/)
   [![License: GPL-3.0](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 </div>
 
