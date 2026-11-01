@@ -1,0 +1,12 @@
+/target
+/dist
+*.pdb
+.idea/
+.vscode/
+
+# Local runtime & cache
+settings.json
+catalog_cache.json
+portable.dat
+artworks/
+*.log
