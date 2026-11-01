@@ -9,6 +9,10 @@
   [![License: GPL-3.0](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 </div>
 
+<div align="center">
+  <img width="320" alt="Cuplikan layar 2026-11-01 120823" src="https://github.com/user-attachments/assets/8c8e2c54-0a2f-43cc-afd9-5cb99100e0c1" />
+  <img width="320" alt="Cuplikan layar 2026-11-01 120927" src="https://github.com/user-attachments/assets/88edf31a-f9b1-4f50-b66b-91edb6d01d8a" />
+</div>
 ---
 
 ## 1. Overview
@@ -22,8 +26,6 @@ Apple Music for Windows does not natively switch USB Audio Class 2 (UAC2) DAC sa
 - **RAM Streaming**: Album art and track resolutions stream in system memory using GDI+ without creating temporary image files on disk.
 - **Automatic State Restoration**: Captures original DAC format on launch and synchronously restores initial configuration upon exit.
 - **Installation Flexibility**: Distributed both as a native Inno Setup 6 installer and as an isolated portable executable.
-<img width="320" alt="Cuplikan layar 2026-11-01 120823" src="https://github.com/user-attachments/assets/8c8e2c54-0a2f-43cc-afd9-5cb99100e0c1" />
-<img width="320" alt="Cuplikan layar 2026-11-01 120927" src="https://github.com/user-attachments/assets/88edf31a-f9b1-4f50-b66b-91edb6d01d8a" />
 
 
 ---
