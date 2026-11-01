@@ -10,8 +10,7 @@
 </div>
 
 <div align="center">
-  <img width="320" alt="LosslessSwitcher-AM main window" src="https://github.com/user-attachments/assets/8c8e2c54-0a2f-43cc-afd9-5cb99100e0c1" />
-  <img width="320" alt="LosslessSwitcher-AM audio settings" src="https://github.com/user-attachments/assets/88edf31a-f9b1-4f50-b66b-91edb6d01d8a" />
+  <img width="450" alt="Recording_11_1_2026_7_00_09_PM3" src="https://github.com/user-attachments/assets/e4ec6293-9da6-4090-bcae-e04ba9490c69" />
 </div>
 
 ---
@@ -23,6 +22,11 @@ Apple Music for Windows does not provide an option to automatically change the W
 **AMWin-LosslessSwitcher** is a lightweight Windows utility that follows Apple Music playback and changes the selected Windows audio endpoint format based on track metadata. It uses Windows System Media Transport Controls (SMTC) to detect playback information and resolves track format information using Apple Music Web and iTunes metadata.
 
 The application changes the Windows endpoint format; it does not decode, capture, or modify Apple Music audio.
+
+<div align="center">
+  <img width="320" alt="LosslessSwitcher-AM main window" src="https://github.com/user-attachments/assets/8c8e2c54-0a2f-43cc-afd9-5cb99100e0c1" />
+  <img width="320" alt="LosslessSwitcher-AM audio settings" src="https://github.com/user-attachments/assets/88edf31a-f9b1-4f50-b66b-91edb6d01d8a" />
+</div>
 
 ## Features
 
