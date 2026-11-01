@@ -10,7 +10,7 @@
 </div>
 
 <div align="center">
-  <img width="450" alt="Recording_11_1_2026_7_00_09_PM3" src="https://github.com/user-attachments/assets/e4ec6293-9da6-4090-bcae-e04ba9490c69" />
+  <img width="540" alt="Recording_11_1_2026_7_00_09_PM3" src="https://github.com/user-attachments/assets/e4ec6293-9da6-4090-bcae-e04ba9490c69" />
 </div>
 
 ---
