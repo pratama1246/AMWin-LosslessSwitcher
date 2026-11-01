@@ -151,7 +151,7 @@ The main application source is under `src/`, with tests under `tests/`. The inst
 
 ## Privacy
 
-LosslessSwitcher-AM requests track-related metadata from public Apple services, including Apple Music Web and iTunes. Application settings and catalog cache are stored locally under `%APPDATA%\LosslessSwitcher-AM`, or beside the executable in portable mode.
+AMWin-LosslessSwitcher requests track-related metadata from public Apple services, including Apple Music Web and iTunes. Application settings and catalog cache are stored locally under `%APPDATA%\AMWin-LosslessSwitcher`, or beside the executable in portable mode.
 
 This README does not make a zero-telemetry claim. That claim should only be added after the application source and its dependencies have been audited for analytics, telemetry, crash reporting, and other outbound data.
 
