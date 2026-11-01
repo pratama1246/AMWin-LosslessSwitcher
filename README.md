@@ -218,6 +218,13 @@ Compiled outputs:
 
 ---
 
-## 10. License
+## 10. Acknowledgments & Special Thanks
+
+- **[Jordan Gibson (`WindowsLosslessSwitcher`)](https://github.com/jordanmgibson/WindowsLosslessSwitcher)** — Special thanks for the original Windows concept and inspiration that sparked the creation of this native 64-bit re-architecture.
+- **[Vincent Neo (`LosslessSwitcher`)](https://github.com/vincentneo/LosslessSwitcher)** — For pioneering automated Apple Music sample rate switching on macOS.
+
+---
+
+## 11. License
 
 This project is licensed under the [GNU General Public License v3.0 (GPL-3.0)](LICENSE).
