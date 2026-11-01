@@ -169,6 +169,18 @@ lossless-switcher-x64/
 - **About Tab**
   - Displays build version, runtime architecture, active storefront, and documentation links.
 
+### Recommended Apple Music & Windows Setup (Getting the Cleanest Output)
+
+Apple Music on Windows does not offer a hardware exclusive mode. A clean, uncolored path through the Windows shared-mode mixer at unity gain is what comes closest to true exclusive mode. Unless you are deliberately using system-wide software EQ (such as Equalizer APO), configure the following once:
+
+- **Update to the Latest Version**: Ensure both **Apple Music for Windows** (via Microsoft Store) and **LosslessSwitcher-AM** (via [GitHub Releases](https://github.com/pratama1246/AMWin-LosslessSwitcher/releases)) are updated to the latest version.
+- **Enable Hi-Res Lossless**: In Apple Music, go to `Settings` -> `Playback` -> enable **Lossless audio**, and set both *Streaming* and *Download* to **Hi-Res Lossless (ALAC up to 24-bit/192 kHz)**.
+- **Disable Sound Check & Dolby Atmos**: In Apple Music `Settings` -> `Playback`, turn off **Sound Check** (volume normalization) and set **Dolby Atmos** to **Off** so stereo lossless streams pass through unaltered.
+- **Set Volume to 100% (Unity Gain)**: Set volume to **100%** in three places: Apple Music's in-app volume slider, the Windows system volume, and Apple Music inside the Windows Volume Mixer (`Settings` -> `System` -> `Sound` -> `Volume mixer`), then control listening volume directly on your external DAC or amplifier.
+- **Turn Off Audio Enhancements**: Go to `Settings` -> `System` -> `Sound` -> select your DAC under *Output* -> `Properties` -> set **Audio enhancements** to **Off**.
+- **Uncheck Legacy Enhancements**: Go to `Settings` -> `System` -> `Sound` -> `More sound settings` (`mmsys.cpl`) -> `Playback` -> select your DAC -> `Properties` -> `Advanced` -> uncheck **"Enable audio enhancements"**.
+- **Turn Off Spatial Sound**: On the same device properties page, ensure **Spatial sound** is set to **Off** and disable any DSP effects in your audio driver's own control panel.
+
 ### Command Line Arguments
 
 | Parameter | Action |
