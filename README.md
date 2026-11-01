@@ -20,7 +20,7 @@
 
 Apple Music for Windows does not provide an option to automatically change the Windows audio endpoint format for each track. As a result, the output device may remain configured to a single sample rate and bit depth while Apple Music plays tracks with different formats.
 
-**LosslessSwitcher-AM** is a lightweight Windows utility that follows Apple Music playback and changes the selected Windows audio endpoint format based on track metadata. It uses Windows System Media Transport Controls (SMTC) to detect playback information and resolves track format information using Apple Music Web and iTunes metadata.
+**AMWin-LosslessSwitcher** is a lightweight Windows utility that follows Apple Music playback and changes the selected Windows audio endpoint format based on track metadata. It uses Windows System Media Transport Controls (SMTC) to detect playback information and resolves track format information using Apple Music Web and iTunes metadata.
 
 The application changes the Windows endpoint format; it does not decode, capture, or modify Apple Music audio.
 
