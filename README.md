@@ -181,6 +181,14 @@ Apple Music on Windows does not offer a hardware exclusive mode. A clean, uncolo
 - **Uncheck Legacy Enhancements**: Go to `Settings` -> `System` -> `Sound` -> `More sound settings` (`mmsys.cpl`) -> `Playback` -> select your DAC -> `Properties` -> `Advanced` -> uncheck **"Enable audio enhancements"**.
 - **Turn Off Spatial Sound**: On the same device properties page, ensure **Spatial sound** is set to **Off** and disable any DSP effects in your audio driver's own control panel.
 
+### Devices Tested
+
+Hardware combinations verified to work reliably. If it works with your DAC setup, feel free to add a row to this table by opening a Pull Request!
+
+| Operating System | Audio Device / DAC | Supported Range | Status |
+| :--- | :--- | :--- | :--- |
+| Windows 11 (x64) | **FiiO JadeAudio JA11** (USB-C DAC) | `44.1 kHz` – `192 kHz` (`16-bit` / `24-bit`) | Verified (Seamless & Purist) |
+
 ### Command Line Arguments
 
 | Parameter | Action |
