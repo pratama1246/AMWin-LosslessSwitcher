@@ -1,7 +1,10 @@
 [package]
 name = "lossless-switcher-am"
 version = "0.1.0"
-edition = "2024"
+edition = "2026"
+authors = ["Pratama Putra"]
+license = "GPL-3.0-only"
+repository = "https://github.com/pratama1246/AMWin-LosslessSwitcher"
 
 [lib]
 name = "lossless_switcher_am"

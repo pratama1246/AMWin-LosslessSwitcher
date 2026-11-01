@@ -10,7 +10,7 @@
   [![GUI](https://img.shields.io/badge/UI-Native%20Win32%20GDI-4CAF50.svg)](#)
   [![DPI Awareness](https://img.shields.io/badge/DPI-Per--Monitor%20V2-orange.svg)](#)
   [![Memory](https://img.shields.io/badge/memory-%3C%208%20MB%20RAM-success.svg)](#)
-  [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+  [![License: GPL-3.0](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 </div>
 
 ---
@@ -148,7 +148,7 @@ lossless-switcher-x64/
 ├── app.manifest                  # Common Controls v6 & Per-Monitor V2 DPI manifest
 ├── build.rs                      # Resource compilation script
 ├── Cargo.toml                    # Rust crate manifest & Windows dependencies
-├── LICENSE                       # MIT License
+├── LICENSE                       # GNU General Public License v3.0
 └── lossless-switcher.rc          # Windows resource compiler definition
 ```
 
@@ -224,4 +224,4 @@ Compiled outputs:
 
 ## 10. License
 
-This project is licensed under the [MIT License](LICENSE).
+This project is licensed under the [GNU General Public License v3.0 (GPL-3.0)](LICENSE).
