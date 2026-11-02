@@ -451,18 +451,18 @@ mod tests {
 
     #[test]
     fn test_parse_media_format_lines() {
-        let coldplay_line = "play&gt; cm&gt;&gt; mediaFormatinfo &apos;000002CCAA29FF4C&apos; , songEnhanced, audioCapabilities: 0x0 -&gt; 0x10, 0x0 -&gt; 0x10, asbdFormatID = qlac, sdFormatID = alac, high res lossless, asbdNumChannels = 2, sdNumChannels = 2, sdBitDepth = 24 bit, asbdSampleRate = 192.0 kHz, is not rendering spatial audio";
-        let parsed_coldplay = parse_media_format_line(coldplay_line).unwrap();
-        assert_eq!(parsed_coldplay.sample_rate, 192000);
-        assert_eq!(parsed_coldplay.bit_depth, 24);
-        assert!(parsed_coldplay.is_lossless);
-        assert!(parsed_coldplay.has_explicit_bit_depth);
+        let sample_192k_line = "play&gt; cm&gt;&gt; mediaFormatinfo &apos;000002CCAA29FF4C&apos; , songEnhanced, audioCapabilities: 0x0 -&gt; 0x10, 0x0 -&gt; 0x10, asbdFormatID = qlac, sdFormatID = alac, high res lossless, asbdNumChannels = 2, sdNumChannels = 2, sdBitDepth = 24 bit, asbdSampleRate = 192.0 kHz, is not rendering spatial audio";
+        let parsed_192k = parse_media_format_line(sample_192k_line).unwrap();
+        assert_eq!(parsed_192k.sample_rate, 192000);
+        assert_eq!(parsed_192k.bit_depth, 24);
+        assert!(parsed_192k.is_lossless);
+        assert!(parsed_192k.has_explicit_bit_depth);
 
-        let riize_line = "play&gt; cm&gt;&gt; mediaFormatinfo &apos;000001DDB43ABF2C&apos; , songEnhanced, audioCapabilities: 0x0 -&gt; 0x10, 0x0 -&gt; 0x10, asbdFormatID = qlac, sdFormatID = alac, high res lossless, asbdNumChannels = 2, sdNumChannels = 2, sdBitDepth = 24 bit, asbdSampleRate = 96.0 kHz, is not rendering spatial audio";
-        let parsed_riize = parse_media_format_line(riize_line).unwrap();
-        assert_eq!(parsed_riize.sample_rate, 96000);
-        assert_eq!(parsed_riize.bit_depth, 24);
-        assert!(parsed_riize.is_lossless);
+        let sample_96k_line = "play&gt; cm&gt;&gt; mediaFormatinfo &apos;000001DDB43ABF2C&apos; , songEnhanced, audioCapabilities: 0x0 -&gt; 0x10, 0x0 -&gt; 0x10, asbdFormatID = qlac, sdFormatID = alac, high res lossless, asbdNumChannels = 2, sdNumChannels = 2, sdBitDepth = 24 bit, asbdSampleRate = 96.0 kHz, is not rendering spatial audio";
+        let parsed_96k = parse_media_format_line(sample_96k_line).unwrap();
+        assert_eq!(parsed_96k.sample_rate, 96000);
+        assert_eq!(parsed_96k.bit_depth, 24);
+        assert!(parsed_96k.is_lossless);
 
         // Transitional qaac -> alac line should be ignored
         let transitional = "play&gt; cm&gt;&gt; mediaFormatinfo &apos;000002CCA8C0326C&apos; , songEnhanced, audioCapabilities: 0x8 -&gt; 0x10, 0x8 -&gt; 0x10, asbdFormatID = qaac, sdFormatID = alac, high res lossless, asbdNumChannels = 2, sdNumChannels = 2, sdBitDepth = 24 bit, asbdSampleRate = 48.0 kHz, is not rendering spatial audio";
