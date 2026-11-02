@@ -26,8 +26,8 @@ impl Default for AppSettings {
 }
 
 pub fn get_app_dir() -> PathBuf {
-    if let Ok(exe_path) = std::env::current_exe() {
-        if let Some(exe_dir) = exe_path.parent() {
+    if let Ok(exe_path) = std::env::current_exe()
+        && let Some(exe_dir) = exe_path.parent() {
             let is_explicit_portable = std::env::args().any(|a| a == "--portable")
                 || exe_dir.join("portable.dat").exists()
                 || exe_dir.join("settings.json").exists();
@@ -35,7 +35,6 @@ pub fn get_app_dir() -> PathBuf {
                 return exe_dir.to_path_buf();
             }
         }
-    }
 
     let app_data = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
     let dir = PathBuf::from(&app_data).join("AMWin-LosslessSwitcher");
@@ -49,11 +48,10 @@ pub fn get_app_dir() -> PathBuf {
 
 pub fn load_settings() -> AppSettings {
     let settings_path = get_app_dir().join("settings.json");
-    if let Ok(content) = fs::read_to_string(&settings_path) {
-        if let Ok(settings) = serde_json::from_str::<AppSettings>(&content) {
+    if let Ok(content) = fs::read_to_string(&settings_path)
+        && let Ok(settings) = serde_json::from_str::<AppSettings>(&content) {
             return settings;
         }
-    }
     AppSettings::default()
 }
 

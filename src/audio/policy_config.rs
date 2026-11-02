@@ -90,7 +90,6 @@ impl PolicyConfig {
         }
     }
 
-
     #[allow(dead_code)]
     pub fn set_device_format_clamped(&self, endpoint_id: &str, target: &AudioFormat) -> windows::core::Result<AudioFormat> {
         let mut candidates = crate::audio::wasapi::WasapiManager::new()
@@ -106,6 +105,8 @@ impl PolicyConfig {
         }
         Err(windows::core::Error::from_hresult(windows::core::HRESULT(0x88890008_u32 as i32)))
     }
+
+
 
     pub fn get_device_format(&self, endpoint_id: &str) -> windows::core::Result<AudioFormat> {
         let wide_id: Vec<u16> = endpoint_id.encode_utf16().chain(std::iter::once(0)).collect();

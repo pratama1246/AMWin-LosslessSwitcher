@@ -70,16 +70,13 @@ impl Coordinator {
                 windows::Win32::System::Com::COINIT_MULTITHREADED,
             )
         };
-        if let Ok(wasapi) = WasapiManager::new() {
-            if let Ok(dev_id) = wasapi.get_default_device_id() {
-                if let Ok(policy) = PolicyConfig::new() {
-                    if let Ok(fmt) = policy.get_device_format(&dev_id) {
+        if let Ok(wasapi) = WasapiManager::new()
+            && let Ok(dev_id) = wasapi.get_default_device_id()
+                && let Ok(policy) = PolicyConfig::new()
+                    && let Ok(fmt) = policy.get_device_format(&dev_id) {
                         let mut map = self.initial_device_formats.lock().unwrap();
                         map.entry(dev_id).or_insert(fmt);
                     }
-                }
-            }
-        }
     }
 
     pub fn get_status(&self) -> CoordinatorStatus {
@@ -116,13 +113,12 @@ impl Coordinator {
             let guard = self.initial_device_formats.lock().unwrap();
             guard.iter().map(|(k, v)| (k.clone(), *v)).collect()
         };
-        if !formats.is_empty() {
-            if let Ok(policy_config) = PolicyConfig::new() {
+        if !formats.is_empty()
+            && let Ok(policy_config) = PolicyConfig::new() {
                 for (dev_id, orig_fmt) in formats {
                     let _ = policy_config.set_device_format(&dev_id, &orig_fmt);
                 }
             }
-        }
     }
 
     pub fn clear_cache(&self) {
@@ -252,11 +248,10 @@ impl Coordinator {
                 // Capture initial format for this device before any modification
                 {
                     let mut map = initial_fmts_arc.lock().unwrap();
-                    if !map.contains_key(&active_device_id) {
-                        if let Some(fmt) = current_dev_fmt {
+                    if !map.contains_key(&active_device_id)
+                        && let Some(fmt) = current_dev_fmt {
                             map.insert(active_device_id.clone(), fmt);
                         }
-                    }
                 }
 
                 let apple_session = smtc.get_apple_music_session();
@@ -339,7 +334,7 @@ impl Coordinator {
                             Some(applied) => {
                                 applied.sample_rate == effective_target_fmt.sample_rate
                                     && applied.bit_depth == effective_target_fmt.bit_depth
-                                    && current_dev_fmt.map_or(false, |cur| {
+                                    && current_dev_fmt.is_some_and(|cur| {
                                         cur.sample_rate == applied.sample_rate && cur.bit_depth == applied.bit_depth
                                     })
                             }
@@ -373,8 +368,8 @@ impl Coordinator {
 
                             let should_resume = is_active || is_new_track;
 
-                            if should_resume {
-                                if let Some(ref session) = apple_session {
+                            if should_resume
+                                && let Some(ref session) = apple_session {
                                     smtc.try_pause(session);
                                     let pause_deadline = Instant::now() + Duration::from_millis(500);
                                     while !smtc.is_paused(session) && Instant::now() < pause_deadline {
@@ -389,7 +384,6 @@ impl Coordinator {
                                     // Drain guard: let AM release its render buffer after reporting Paused.
                                     thread::sleep(Duration::from_millis(100));
                                 }
-                            }
 
                             // Dynamic smart settling delay: sample rates >= 96kHz or clock family transitions require extra PLL clock-lock time
                             let is_high_rate = effective_target_fmt.sample_rate >= 96000 || cur_rate >= 96000;
@@ -431,11 +425,10 @@ impl Coordinator {
 
                             if should_resume {
                                 let resume_session = smtc.get_apple_music_session().or_else(|| apple_session.clone());
-                                if let Some(ref session) = resume_session {
-                                    if !smtc.resume_playback_reliable(session) {
+                                if let Some(ref session) = resume_session
+                                    && !smtc.resume_playback_reliable(session) {
                                         resume_until = Some(Instant::now() + Duration::from_secs(8));
                                     }
-                                }
                             }
 
                             let (applied_fmt, is_clamped) = match switch_res {

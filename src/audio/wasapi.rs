@@ -49,8 +49,8 @@ impl WasapiManager {
             let count = collection.GetCount()?;
 
             for i in 0..count {
-                if let Ok(device) = collection.Item(i) {
-                    if let Ok(id_str) = get_device_id(&device) {
+                if let Ok(device) = collection.Item(i)
+                    && let Ok(id_str) = get_device_id(&device) {
                         let name = get_device_friendly_name(&device)
                             .unwrap_or_else(|_| "Unknown Audio Device".to_string());
                         let is_default = id_str == default_id;
@@ -60,7 +60,6 @@ impl WasapiManager {
                             is_default,
                         });
                     }
-                }
             }
         }
         Ok(devices)

@@ -92,6 +92,7 @@ const TCN_SELCHANGE: u32 = TCN_FIRST.wrapping_sub(1);
 const NIF_INFO: u32 = 0x00000010;
 const NIIF_INFO: u32 = 0x00000001;
 
+#[allow(non_camel_case_types, clippy::upper_case_acronyms)]
 #[repr(C)]
 struct TCITEMW {
     mask: u32,
@@ -103,6 +104,7 @@ struct TCITEMW {
     l_param: isize,
 }
 
+#[allow(non_camel_case_types, clippy::upper_case_acronyms)]
 #[repr(C)]
 struct NMHDR {
     hwnd_from: HWND,
@@ -219,13 +221,12 @@ pub fn run_app() {
         };
         if GetLastError() == ERROR_ALREADY_EXISTS {
             let class_name = w!("LosslessSwitcherX64Class");
-            if let Ok(existing_hwnd) = FindWindowW(class_name, PCWSTR::null()) {
-                if !existing_hwnd.0.is_null() {
+            if let Ok(existing_hwnd) = FindWindowW(class_name, PCWSTR::null())
+                && !existing_hwnd.0.is_null() {
                     let _ = PostMessageW(existing_hwnd, WM_COMMAND, WPARAM(ID_TRAY_OPEN), LPARAM(0));
                     let _ = ShowWindow(existing_hwnd, SW_RESTORE);
                     let _ = SetForegroundWindow(existing_hwnd);
                 }
-            }
             let _ = CloseHandle(single_instance_mutex);
             return;
         }
@@ -283,8 +284,8 @@ pub fn run_app() {
         let coordinator = Arc::new(Coordinator::new(saved_settings.mode, saved_settings.settling_delay_ms));
         if let Some(ref dev_id) = saved_settings.selected_device_id {
             let mut resolved_id = Some(dev_id.clone());
-            if let Ok(wasapi) = WasapiManager::new() {
-                if let Ok(devices) = wasapi.list_render_devices() {
+            if let Ok(wasapi) = WasapiManager::new()
+                && let Ok(devices) = wasapi.list_render_devices() {
                     let exists = devices.iter().any(|d| &d.id == dev_id);
                     if !exists {
                         if let Some(ref dev_name) = saved_settings.selected_device_name {
@@ -298,7 +299,6 @@ pub fn run_app() {
                         }
                     }
                 }
-            }
             if let Some(ref id) = resolved_id {
                 coordinator.set_device_id(Some(id.clone()));
             }
@@ -352,11 +352,10 @@ pub fn run_app() {
         if !start_in_tray {
             let _ = ShowWindow(hwnd, SW_SHOW);
             let _ = UpdateWindow(hwnd);
-        } else if let Ok(mut guard) = APP_STATE.lock() {
-            if let Some(ref mut state) = *guard {
+        } else if let Ok(mut guard) = APP_STATE.lock()
+            && let Some(ref mut state) = *guard {
                 state.is_in_tray = true;
             }
-        }
 
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
@@ -366,11 +365,10 @@ pub fn run_app() {
 
         coordinator.shutdown();
 
-        if let Ok(guard) = GDIPLUS_TOKEN.lock() {
-            if *guard != 0 {
+        if let Ok(guard) = GDIPLUS_TOKEN.lock()
+            && *guard != 0 {
                 GdiplusShutdown(*guard);
             }
-        }
         windows::Win32::System::Com::CoUninitialize();
         let _ = CloseHandle(single_instance_mutex);
     }
@@ -423,8 +421,8 @@ unsafe fn apply_dpi(dpi: u32) {
         SendMessageW(h, WM_SETFONT, WPARAM(f.0 as usize), LPARAM(1));
     }
 
-    if let Ok(mut guard) = APP_STATE.lock() {
-        if let Some(ref mut s) = *guard {
+    if let Ok(mut guard) = APP_STATE.lock()
+        && let Some(ref mut s) = *guard {
             s.font = font;
             s.font_bold = font_bold;
             s.font_title = font_title;
@@ -448,7 +446,6 @@ unsafe fn apply_dpi(dpi: u32) {
                 }
             }
         }
-    }
     let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(old_font.0 as *mut _));
     let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(old_bold.0 as *mut _));
     let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(old_title.0 as *mut _));
@@ -486,15 +483,14 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             let hdc = windows::Win32::Graphics::Gdi::HDC(wparam.0 as _);
             SetBkMode(hdc, TRANSPARENT);
             let ctrl_hwnd = HWND(lparam.0 as *mut _);
-            if let Ok(guard) = APP_STATE.try_lock() {
-                if let Some(ref state) = *guard {
+            if let Ok(guard) = APP_STATE.try_lock()
+                && let Some(ref state) = *guard {
                     if state.muted_labels.contains(&ctrl_hwnd) {
                         SetTextColor(hdc, COLORREF(0x006E6E6E));
                     } else if state.title_labels.contains(&ctrl_hwnd) {
                         SetTextColor(hdc, COLORREF(0x00111111));
                     }
                 }
-            }
             LRESULT(get_bg_brush().0 as isize)
         }
         WM_TIMER => {
@@ -504,16 +500,14 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             LRESULT(0)
         }
         WM_HSCROLL => {
-            if let Ok(mut guard) = APP_STATE.lock() {
-                if let Some(ref mut state) = *guard {
-                    if lparam.0 == state.trackbar_delay.0 as isize {
+            if let Ok(mut guard) = APP_STATE.lock()
+                && let Some(ref mut state) = *guard
+                    && lparam.0 == state.trackbar_delay.0 as isize {
                         let pos = SendMessageW(state.trackbar_delay, TBM_GETPOS, WPARAM(0), LPARAM(0)).0 as u64;
                         let text = format!("DAC Delay: {} ms", pos);
                         set_window_text(state.label_delay, &text);
                         state.coordinator.set_settling_delay(pos);
                     }
-                }
-            }
             save_current_settings();
             LRESULT(0)
         }
@@ -521,30 +515,28 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             let cmd_id = (wparam.0 & 0xFFFF) as isize;
             match cmd_id {
                 ID_RADIO_SEAMLESS => {
-                    if let Ok(mut guard) = APP_STATE.lock() {
-                        if let Some(ref mut state) = *guard {
+                    if let Ok(mut guard) = APP_STATE.lock()
+                        && let Some(ref mut state) = *guard {
                             SendMessageW(state.radio_seamless, BM_SETCHECK, WPARAM(1), LPARAM(0));
                             SendMessageW(state.radio_purist, BM_SETCHECK, WPARAM(0), LPARAM(0));
                             state.coordinator.set_mode(SwitcherMode::Seamless);
                         }
-                    }
                     save_current_settings();
                 }
                 ID_RADIO_PURIST => {
-                    if let Ok(mut guard) = APP_STATE.lock() {
-                        if let Some(ref mut state) = *guard {
+                    if let Ok(mut guard) = APP_STATE.lock()
+                        && let Some(ref mut state) = *guard {
                             SendMessageW(state.radio_seamless, BM_SETCHECK, WPARAM(0), LPARAM(0));
                             SendMessageW(state.radio_purist, BM_SETCHECK, WPARAM(1), LPARAM(0));
                             state.coordinator.set_mode(SwitcherMode::Purist);
                         }
-                    }
                     save_current_settings();
                 }
                 ID_DEVICE_COMBO => {
                     let code = (wparam.0 >> 16) & 0xFFFF;
                     if code == 1 {
-                        if let Ok(mut guard) = APP_STATE.lock() {
-                            if let Some(ref mut state) = *guard {
+                        if let Ok(mut guard) = APP_STATE.lock()
+                            && let Some(ref mut state) = *guard {
                                 let idx = SendMessageW(state.combo_devices, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 as usize;
                                 if idx == 0 {
                                     state.coordinator.set_device_id(None);
@@ -553,7 +545,6 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                     state.coordinator.set_device_id(Some(dev.id.clone()));
                                 }
                             }
-                        }
                         save_current_settings();
                     }
                 }
@@ -563,33 +554,30 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 }
                 ID_BTN_MINIMIZE => {
                     let _ = ShowWindow(hwnd, SW_HIDE);
-                    if let Ok(mut guard) = APP_STATE.lock() {
-                        if let Some(ref mut state) = *guard {
+                    if let Ok(mut guard) = APP_STATE.lock()
+                        && let Some(ref mut state) = *guard {
                             state.is_in_tray = true;
                         }
-                    }
                 }
                 ID_CHK_ALWAYS_ON_TOP => {
-                    if let Ok(mut guard) = APP_STATE.lock() {
-                        if let Some(ref mut state) = *guard {
+                    if let Ok(mut guard) = APP_STATE.lock()
+                        && let Some(ref mut state) = *guard {
                             let is_checked = SendMessageW(state.chk_always_on_top, BM_GETCHECK, WPARAM(0), LPARAM(0)).0 != 0;
                             state.is_always_on_top = is_checked;
                             set_always_on_top(state.main_hwnd, is_checked);
                         }
-                    }
                     save_current_settings();
                 }
                 ID_CHK_STARTUP => {
-                    if let Ok(guard) = APP_STATE.lock() {
-                        if let Some(ref state) = *guard {
+                    if let Ok(guard) = APP_STATE.lock()
+                        && let Some(ref state) = *guard {
                             let is_checked = SendMessageW(state.chk_startup, BM_GETCHECK, WPARAM(0), LPARAM(0)).0 != 0;
                             set_startup_enabled(is_checked);
                         }
-                    }
                 }
                 ID_BTN_CLEAR_CACHE | ID_BTN_CLEAR_CACHE_ABOUT => {
-                    if let Ok(mut guard) = APP_STATE.lock() {
-                        if let Some(ref mut state) = *guard {
+                    if let Ok(mut guard) = APP_STATE.lock()
+                        && let Some(ref mut state) = *guard {
                             state.coordinator.clear_cache();
                             state.current_art_hash = None;
                             if let Some(old_hbm) = state.current_hbitmap.take() {
@@ -603,7 +591,6 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                             );
                             set_window_text(state.label_status, "Status: Cache cleared! Next track will refresh.");
                         }
-                    }
                 }
                 ID_BTN_GITHUB => {
                     let _ = unsafe {
@@ -623,52 +610,47 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                         ID_TRAY_OPEN => {
                             let _ = ShowWindow(hwnd, SW_RESTORE);
                             let _ = SetForegroundWindow(hwnd);
-                            if let Ok(mut guard) = APP_STATE.lock() {
-                                if let Some(ref mut state) = *guard {
+                            if let Ok(mut guard) = APP_STATE.lock()
+                                && let Some(ref mut state) = *guard {
                                     state.is_in_tray = false;
                                 }
-                            }
                         }
                         ID_TRAY_SEAMLESS => {
-                            if let Ok(mut guard) = APP_STATE.lock() {
-                                if let Some(ref mut state) = *guard {
+                            if let Ok(mut guard) = APP_STATE.lock()
+                                && let Some(ref mut state) = *guard {
                                     SendMessageW(state.radio_seamless, BM_SETCHECK, WPARAM(1), LPARAM(0));
                                     SendMessageW(state.radio_purist, BM_SETCHECK, WPARAM(0), LPARAM(0));
                                     state.coordinator.set_mode(SwitcherMode::Seamless);
                                 }
-                            }
                             save_current_settings();
                         }
                         ID_TRAY_PURIST => {
-                            if let Ok(mut guard) = APP_STATE.lock() {
-                                if let Some(ref mut state) = *guard {
+                            if let Ok(mut guard) = APP_STATE.lock()
+                                && let Some(ref mut state) = *guard {
                                     SendMessageW(state.radio_seamless, BM_SETCHECK, WPARAM(0), LPARAM(0));
                                     SendMessageW(state.radio_purist, BM_SETCHECK, WPARAM(1), LPARAM(0));
                                     state.coordinator.set_mode(SwitcherMode::Purist);
                                 }
-                            }
                             save_current_settings();
                         }
                         ID_TRAY_ALWAYS_ON_TOP => {
-                            if let Ok(mut guard) = APP_STATE.lock() {
-                                if let Some(ref mut state) = *guard {
+                            if let Ok(mut guard) = APP_STATE.lock()
+                                && let Some(ref mut state) = *guard {
                                     state.is_always_on_top = !state.is_always_on_top;
                                     let check_val = if state.is_always_on_top { 1 } else { 0 };
                                     SendMessageW(state.chk_always_on_top, BM_SETCHECK, WPARAM(check_val), LPARAM(0));
                                     set_always_on_top(state.main_hwnd, state.is_always_on_top);
                                 }
-                            }
                             save_current_settings();
                         }
                         ID_TRAY_STARTUP => {
-                            if let Ok(guard) = APP_STATE.lock() {
-                                if let Some(ref state) = *guard {
+                            if let Ok(guard) = APP_STATE.lock()
+                                && let Some(ref state) = *guard {
                                     let new_val = !is_startup_enabled();
                                     set_startup_enabled(new_val);
                                     let check_val = if new_val { 1 } else { 0 };
                                     SendMessageW(state.chk_startup, BM_SETCHECK, WPARAM(check_val), LPARAM(0));
                                 }
-                            }
                         }
                         ID_TRAY_EXIT => {
                             let _ = DestroyWindow(hwnd);
@@ -726,11 +708,10 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
         }
         WM_CLOSE => {
             let _ = ShowWindow(hwnd, SW_HIDE);
-            if let Ok(mut guard) = APP_STATE.lock() {
-                if let Some(ref mut state) = *guard {
+            if let Ok(mut guard) = APP_STATE.lock()
+                && let Some(ref mut state) = *guard {
                     state.is_in_tray = true;
                 }
-            }
             LRESULT(0)
         }
         WM_TRAY_ICON => {
@@ -739,11 +720,10 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 WM_LBUTTONDBLCLK => {
                     let _ = ShowWindow(hwnd, SW_RESTORE);
                     let _ = SetForegroundWindow(hwnd);
-                    if let Ok(mut guard) = APP_STATE.lock() {
-                        if let Some(ref mut state) = *guard {
+                    if let Ok(mut guard) = APP_STATE.lock()
+                        && let Some(ref mut state) = *guard {
                             state.is_in_tray = false;
                         }
-                    }
                 }
                 WM_RBUTTONUP => {
                     show_tray_context_menu(hwnd);
@@ -754,17 +734,16 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
         }
         WM_DESTROY => {
             remove_tray_icon(hwnd);
-            if let Ok(guard) = APP_STATE.lock() {
-                if let Some(ref state) = *guard {
+            if let Ok(guard) = APP_STATE.lock()
+                && let Some(ref state) = *guard {
                     state.coordinator.shutdown();
                 }
-            }
             let raw = BG_BRUSH.swap(0, std::sync::atomic::Ordering::Relaxed);
             if raw != 0 {
                 let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(raw as *mut _));
             }
-            if let Ok(mut guard) = APP_STATE.lock() {
-                if let Some(ref mut state) = *guard {
+            if let Ok(mut guard) = APP_STATE.lock()
+                && let Some(ref mut state) = *guard {
                     let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(state.font.0 as *mut _));
                     let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(state.font_bold.0 as *mut _));
                     let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(state.font_title.0 as *mut _));
@@ -777,7 +756,6 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                         let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(hbm.0 as *mut _));
                     }
                 }
-            }
             PostQuitMessage(0);
             LRESULT(0)
         }
@@ -826,48 +804,21 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
     ).unwrap();
     SendMessageW(tab_ctrl, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
 
-    // Tab 0: "Now Playing"
-    let mut tab0_text: Vec<u16> = "Now Playing".encode_utf16().chain(std::iter::once(0)).collect();
-    let mut tie0 = TCITEMW {
-        mask: TCIF_TEXT,
-        dw_state: 0,
-        dw_state_mask: 0,
-        psz_text: tab0_text.as_mut_ptr(),
-        cch_text_max: tab0_text.len() as i32,
-        i_image: -1,
-        l_param: 0,
-    };
-    SendMessageW(tab_ctrl, TCM_INSERTITEMW, WPARAM(0), LPARAM(&mut tie0 as *mut _ as isize));
+    for (i, title) in ["Now Playing", "Audio Settings", "About"].iter().enumerate() {
+        let mut tab_text: Vec<u16> = title.encode_utf16().chain(std::iter::once(0)).collect();
+        let mut tie = TCITEMW {
+            mask: TCIF_TEXT,
+            dw_state: 0,
+            dw_state_mask: 0,
+            psz_text: tab_text.as_mut_ptr(),
+            cch_text_max: tab_text.len() as i32,
+            i_image: -1,
+            l_param: 0,
+        };
+        SendMessageW(tab_ctrl, TCM_INSERTITEMW, WPARAM(i), LPARAM(&mut tie as *mut _ as isize));
+    }
 
-    // Tab 1: "Audio Settings"
-    let mut tab1_text: Vec<u16> = "Audio Settings".encode_utf16().chain(std::iter::once(0)).collect();
-    let mut tie1 = TCITEMW {
-        mask: TCIF_TEXT,
-        dw_state: 0,
-        dw_state_mask: 0,
-        psz_text: tab1_text.as_mut_ptr(),
-        cch_text_max: tab1_text.len() as i32,
-        i_image: -1,
-        l_param: 0,
-    };
-    SendMessageW(tab_ctrl, TCM_INSERTITEMW, WPARAM(1), LPARAM(&mut tie1 as *mut _ as isize));
-
-    // Tab 2: "About"
-    let mut tab2_text: Vec<u16> = "About".encode_utf16().chain(std::iter::once(0)).collect();
-    let mut tie2 = TCITEMW {
-        mask: TCIF_TEXT,
-        dw_state: 0,
-        dw_state_mask: 0,
-        psz_text: tab2_text.as_mut_ptr(),
-        cch_text_max: tab2_text.len() as i32,
-        i_image: -1,
-        l_param: 0,
-    };
-    SendMessageW(tab_ctrl, TCM_INSERTITEMW, WPARAM(2), LPARAM(&mut tie2 as *mut _ as isize));
-
-    // ==========================================
-    // TAB 0 CONTROLS (Now Playing - Visible by default)
-    // ==========================================
+    // Tab 0: Now Playing (visible by default)
     let artwork_size = scale_val(145, scale);
     let ctrl_artwork = create_ctrl(
         w!("STATIC"), w!(""),
@@ -923,9 +874,7 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
         btn_min,
     ];
 
-    // ==========================================
-    // TAB 1 CONTROLS (Audio & Settings - Hidden by default)
-    // ==========================================
+    // Tab 1: Audio Settings (hidden by default)
     let grp_device = create_ctrl(
         w!("BUTTON"), w!(" Output Device "),
         WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(windows::Win32::UI::WindowsAndMessaging::BS_GROUPBOX as u32),
@@ -1052,10 +1001,7 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
         btn_clear_cache,
     ];
 
-    // ==========================================
-    // TAB 2 CONTROLS (About - Hidden by default)
-    // ==========================================
-    // 1. Judul
+    // Tab 2: About (hidden by default)
     let label_app_title = create_ctrl(
         w!("STATIC"), w!("LosslessSwitcher For Apple Music"),
         WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX),
@@ -1063,15 +1009,15 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
     );
     SendMessageW(label_app_title, WM_SETFONT, WPARAM(font_title.0 as usize), LPARAM(1));
 
-    // 2. Version
+    let version_text = format!("Version {} (Native 64-bit Windows)", env!("CARGO_PKG_VERSION"));
+    let wide_version: Vec<u16> = version_text.encode_utf16().chain(std::iter::once(0)).collect();
     let label_app_version = create_ctrl(
-        w!("STATIC"), w!("Version 0.2.0 (Native 64-bit Windows)"),
+        w!("STATIC"), PCWSTR::from_raw(wide_version.as_ptr()),
         WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX),
         scale_val(40, scale), scale_val(86, scale), scale_val(408, scale), scale_val(16, scale), parent, None, hinstance,
     );
     SendMessageW(label_app_version, WM_SETFONT, WPARAM(font_sub.0 as usize), LPARAM(1));
 
-    // 3. Desc
     let label_app_desc = create_ctrl(
         w!("STATIC"), w!("Automatically synchronizes DAC sample rate with Apple Music on Windows to match track metadata."),
         WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX),
@@ -1079,7 +1025,6 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
     );
     SendMessageW(label_app_desc, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
 
-    // 4. LOGO di tengah (centered horizontally at X = 221)
     let logo_size = scale_val(48, scale);
     let logo_hbm = load_image_from_bytes(LOGO_PNG, logo_size);
     let ctrl_logo = create_ctrl(
@@ -1091,7 +1036,6 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
         SendMessageW(ctrl_logo, STM_SETIMAGE, WPARAM(IMAGE_BITMAP), LPARAM(hbm.0 as isize));
     }
 
-    // 5. Optimized For Apple Music For Windows
     let label_app_optimized = create_ctrl(
         w!("STATIC"), w!("Optimized for Apple Music for Windows"),
         WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX),
@@ -1099,7 +1043,6 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
     );
     SendMessageW(label_app_optimized, WM_SETFONT, WPARAM(font_sub.0 as usize), LPARAM(1));
 
-    // 6. Not Affiliated with Apple inc
     let label_app_disclaimer = create_ctrl(
         w!("STATIC"), w!("Not affiliated with Apple Inc."),
         WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX),
@@ -1107,7 +1050,6 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
     );
     SendMessageW(label_app_disclaimer, WM_SETFONT, WPARAM(font_sub.0 as usize), LPARAM(1));
 
-    // 7. Logo Copyright (simbol ©) + All rights reserved
     let label_app_copyright = create_ctrl(
         w!("STATIC"), w!("Developed by Pratama Putra © 2026. All rights reserved."),
         WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX),
@@ -1115,7 +1057,6 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
     );
     SendMessageW(label_app_copyright, WM_SETFONT, WPARAM(font_sub.0 as usize), LPARAM(1));
 
-    // 8. GitHub button
     let btn_github = create_ctrl(
         w!("BUTTON"), w!("GitHub"),
         WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(windows::Win32::UI::WindowsAndMessaging::BS_PUSHBUTTON as u32),
@@ -1123,7 +1064,6 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
     );
     SendMessageW(btn_github, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
 
-    // 9. Clear Cache button
     let btn_clear_cache_about = create_ctrl(
         w!("BUTTON"), w!("Clear Cache"),
         WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(windows::Win32::UI::WindowsAndMessaging::BS_PUSHBUTTON as u32),
@@ -1222,6 +1162,7 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
     refresh_device_list();
 }
 
+#[allow(clippy::too_many_arguments)]
 unsafe fn create_ctrl(
     class: PCWSTR,
     text: PCWSTR,
@@ -1249,8 +1190,8 @@ unsafe fn create_ctrl(
 }
 
 unsafe fn save_current_settings() {
-    if let Ok(guard) = APP_STATE.lock() {
-        if let Some(ref state) = *guard {
+    if let Ok(guard) = APP_STATE.lock()
+        && let Some(ref state) = *guard {
             let status = state.coordinator.get_status();
             let selected_id = state.coordinator.get_device_id();
             let selected_name = selected_id.as_ref().and_then(|id| {
@@ -1265,14 +1206,13 @@ unsafe fn save_current_settings() {
             };
             crate::config::save_settings(&settings);
         }
-    }
 }
 
 unsafe fn refresh_device_list() {
-    if let Ok(wasapi) = WasapiManager::new() {
-        if let Ok(devices) = wasapi.list_render_devices() {
-            if let Ok(mut guard) = APP_STATE.lock() {
-                if let Some(ref mut state) = *guard {
+    if let Ok(wasapi) = WasapiManager::new()
+        && let Ok(devices) = wasapi.list_render_devices()
+            && let Ok(mut guard) = APP_STATE.lock()
+                && let Some(ref mut state) = *guard {
                     SendMessageW(state.combo_devices, CB_RESETCONTENT, WPARAM(0), LPARAM(0));
 
                     // Index 0: Auto (Windows Default Device)
@@ -1296,21 +1236,18 @@ unsafe fn refresh_device_list() {
                         SendMessageW(state.combo_devices, CB_ADDSTRING, WPARAM(0), LPARAM(pcwstr.as_ptr() as isize));
 
                         let combo_idx = i + 1;
-                        if let Some(ref target_id) = saved_dev_id {
-                            if &dev.id == target_id {
+                        if let Some(ref target_id) = saved_dev_id
+                            && &dev.id == target_id {
                                 select_idx = combo_idx;
                             }
-                        }
                     }
 
                     // Fallback to name matching if GUID changed across USB reconnections
-                    if select_idx == 0 && saved_dev_id.is_some() {
-                        if let Some(ref target_name) = saved_settings.selected_device_name {
-                            if let Some(pos) = devices.iter().position(|d| &d.name == target_name) {
+                    if select_idx == 0 && saved_dev_id.is_some()
+                        && let Some(ref target_name) = saved_settings.selected_device_name
+                            && let Some(pos) = devices.iter().position(|d| &d.name == target_name) {
                                 select_idx = pos + 1;
                             }
-                        }
-                    }
 
                     SendMessageW(state.combo_devices, CB_SETCURSEL, WPARAM(select_idx), LPARAM(0));
                     if select_idx == 0 {
@@ -1321,14 +1258,11 @@ unsafe fn refresh_device_list() {
 
                     state.cached_devices = devices;
                 }
-            }
-        }
-    }
 }
 
 unsafe fn update_status_display() {
-    if let Ok(mut guard) = APP_STATE.lock() {
-        if let Some(ref mut state) = *guard {
+    if let Ok(mut guard) = APP_STATE.lock()
+        && let Some(ref mut state) = *guard {
             let status = state.coordinator.get_status();
 
             // Update artwork if in-memory bytes changed
@@ -1398,8 +1332,8 @@ unsafe fn update_status_display() {
             let status_text = format!("Status: {}", status_msg);
             set_window_text(state.label_status, &status_text);
 
-            if let Some(cur_fmt) = status.current_device_format {
-                if !status.is_syncing && state.last_notified_fmt != Some(cur_fmt) {
+            if let Some(cur_fmt) = status.current_device_format
+                && !status.is_syncing && state.last_notified_fmt != Some(cur_fmt) {
                     if state.last_notified_fmt.is_some() {
                         let note_msg = if !status.is_lossless {
                             format!("Output: {} (AAC Lossy)", cur_fmt.display_str())
@@ -1416,9 +1350,7 @@ unsafe fn update_status_display() {
                     }
                     state.last_notified_fmt = Some(cur_fmt);
                 }
-            }
         }
-    }
 }
 
 unsafe fn show_native_notification(hwnd: HWND, title: &str, message: &str) {
@@ -1548,21 +1480,19 @@ unsafe fn set_window_text(hwnd: HWND, text: &str) {
     if len > 0 {
         let mut buf = vec![0u16; (len + 1) as usize];
         let read = windows::Win32::UI::WindowsAndMessaging::GetWindowTextW(hwnd, &mut buf);
-        if read as usize == len as usize {
-            if let Ok(cur) = String::from_utf16(&buf[..len as usize]) {
-                if cur == text {
+        if read as usize == len as usize
+            && let Ok(cur) = String::from_utf16(&buf[..len as usize])
+                && cur == text {
                     return;
                 }
-            }
-        }
     } else if text.is_empty() {
         return;
     }
 
     let wide: Vec<u16> = text.encode_utf16().chain(std::iter::once(0)).collect();
     let _ = windows::Win32::UI::WindowsAndMessaging::SetWindowTextW(hwnd, PCWSTR::from_raw(wide.as_ptr()));
-    if let Ok(parent) = windows::Win32::UI::WindowsAndMessaging::GetParent(hwnd) {
-        if !parent.0.is_null() {
+    if let Ok(parent) = windows::Win32::UI::WindowsAndMessaging::GetParent(hwnd)
+        && !parent.0.is_null() {
             let mut rect = RECT::default();
             let _ = windows::Win32::UI::WindowsAndMessaging::GetWindowRect(hwnd, &mut rect);
             let mut points = [
@@ -1578,7 +1508,6 @@ unsafe fn set_window_text(hwnd: HWND, text: &str) {
             };
             let _ = InvalidateRect(parent, Some(&parent_rect), true);
         }
-    }
     let _ = InvalidateRect(hwnd, None, true);
 }
 

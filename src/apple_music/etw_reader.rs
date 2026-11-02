@@ -78,12 +78,11 @@ impl EtwLogReader {
         let Some((path, _)) = newest_etl_in_dir(dir) else {
             return false;
         };
-        if let Ok(meta) = fs::metadata(path) {
-            if let Ok(modified) = meta.modified() {
-                if let Ok(elapsed) = SystemTime::now().duration_since(modified) {
-                    return elapsed <= Duration::from_secs(180);
-                }
-            }
+        if let Ok(meta) = fs::metadata(path)
+            && let Ok(modified) = meta.modified()
+            && let Ok(elapsed) = SystemTime::now().duration_since(modified)
+        {
+            return elapsed <= Duration::from_secs(180);
         }
         false
     }
@@ -108,11 +107,10 @@ impl EtwLogReader {
     pub fn get_latest_lossless_since(&self, min_seq: u64) -> Option<(Option<i64>, EtwMediaFormat)> {
         self.refresh_logs_if_needed();
         let st = self.state.lock().ok()?;
-        if let Some((adam_id, fmt, seq)) = st.latest_active_format {
-            if seq > min_seq && fmt.is_lossless {
+        if let Some((adam_id, fmt, seq)) = st.latest_active_format
+            && seq > min_seq && fmt.is_lossless {
                 return Some((adam_id, fmt));
             }
-        }
         None
     }
 
@@ -134,8 +132,8 @@ impl EtwLogReader {
                 etl_files.push(active_path);
             }
 
-            if !etl_files.is_empty() {
-                if let Some(xml) = run_tracerpt(&etl_files) {
+            if !etl_files.is_empty()
+                && let Some(xml) = run_tracerpt(&etl_files) {
                     if let Ok(mut st) = self.state.lock() {
                         parse_tracerpt_xml(&xml, &mut st);
                         st.initialized_saved_logs = true;
@@ -147,7 +145,6 @@ impl EtwLogReader {
                     }
                     return;
                 }
-            }
 
             if let Ok(mut st) = self.state.lock() {
                 st.initialized_saved_logs = true;
@@ -164,22 +161,20 @@ impl EtwLogReader {
             let size_changed = active_len != st.last_active_len && active_len > 0;
             let throttle_ok = st
                 .last_active_scan
-                .map_or(true, |t| t.elapsed() >= Duration::from_millis(200));
+                .is_none_or(|t| t.elapsed() >= Duration::from_millis(200));
             (path_changed || size_changed) && throttle_ok
         } else {
             false
         };
 
-        if should_scan_active {
-            if let Some(xml) = run_tracerpt(&[active_path.clone()]) {
-                if let Ok(mut st) = self.state.lock() {
+        if should_scan_active
+            && let Some(xml) = run_tracerpt(std::slice::from_ref(&active_path))
+                && let Ok(mut st) = self.state.lock() {
                     parse_tracerpt_xml(&xml, &mut st);
                     st.last_active_path = Some(active_path);
                     st.last_active_len = active_len;
                     st.last_active_scan = Some(Instant::now());
                 }
-            }
-        }
     }
 }
 
@@ -246,16 +241,14 @@ fn recent_etls_in_dir(dir: &Path, max_count: usize) -> Vec<PathBuf> {
         if !fname_str.starts_with("AMPLibraryAgent_") || !fname_str.ends_with(".etl") {
             continue;
         }
-        if let Ok(meta) = entry.metadata() {
-            if meta.len() > 1024 {
+        if let Ok(meta) = entry.metadata()
+            && meta.len() > 1024 {
                 let modified = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH);
                 files.push((path, modified));
             }
-        }
     }
 
-    // Sort descending to take the most recent `max_count`, then reverse so oldest is parsed first
-    files.sort_by(|a, b| b.1.cmp(&a.1));
+    files.sort_by_key(|a| std::cmp::Reverse(a.1));
     files.truncate(max_count);
     files.reverse();
     files.into_iter().map(|(p, _)| p).collect()
@@ -313,24 +306,22 @@ fn parse_tracerpt_xml(xml: &str, state: &mut EtwState) {
         }
 
         if let Some(id_str) = msg.strip_prefix("adamID:") {
-            if let Ok(id) = id_str.trim().parse::<i64>() {
-                if id > 0 {
+            if let Ok(id) = id_str.trim().parse::<i64>()
+                && id > 0 {
                     current_adam_id = Some(id);
                     state.latest_active_adam_id = Some(id);
                 }
-            }
             continue;
         }
 
         if let Some(pos) = msg.find("/songs/") {
             let after_songs = &msg[pos + 7..];
             if let Some(slash_pos) = after_songs.find("/syllable-lyrics") {
-                if let Ok(id) = after_songs[..slash_pos].trim().parse::<i64>() {
-                    if id > 0 {
+                if let Ok(id) = after_songs[..slash_pos].trim().parse::<i64>()
+                    && id > 0 {
                         current_adam_id = Some(id);
                         state.latest_active_adam_id = Some(id);
                     }
-                }
                 continue;
             }
         }
@@ -338,31 +329,28 @@ fn parse_tracerpt_xml(xml: &str, state: &mut EtwState) {
         if let Some(pos) = msg.find("Doing lease action 1 (start) for adamID ") {
             let after_prefix = &msg[pos + "Doing lease action 1 (start) for adamID ".len()..];
             let digits: String = after_prefix.chars().take_while(|c| c.is_ascii_digit()).collect();
-            if let Ok(id) = digits.parse::<i64>() {
-                if id > 0 {
+            if let Ok(id) = digits.parse::<i64>()
+                && id > 0 {
                     current_adam_id = Some(id);
                     state.latest_active_adam_id = Some(id);
                 }
-            }
             continue;
         }
 
-        if current_adam_id.is_none() {
-            if let Some(pos) = msg.find("Loading asset for ") {
+        if current_adam_id.is_none()
+            && let Some(pos) = msg.find("Loading asset for ") {
                 let after_prefix = &msg[pos + "Loading asset for ".len()..];
                 let digits: String = after_prefix.chars().take_while(|c| c.is_ascii_digit()).collect();
-                if let Ok(id) = digits.parse::<i64>() {
-                    if id > 0 {
+                if let Ok(id) = digits.parse::<i64>()
+                    && id > 0 {
                         current_adam_id = Some(id);
                         state.latest_active_adam_id = Some(id);
                     }
-                }
                 continue;
             }
-        }
 
-        if msg.contains("mediaFormatinfo") {
-            if let Some(parsed) = parse_media_format_line(msg) {
+        if msg.contains("mediaFormatinfo")
+            && let Some(parsed) = parse_media_format_line(msg) {
                 state.event_seq = state.event_seq.wrapping_add(1);
                 state.latest_active_format = Some((current_adam_id, parsed, state.event_seq));
 
@@ -376,7 +364,6 @@ fn parse_tracerpt_xml(xml: &str, state: &mut EtwState) {
                     }
                 }
             }
-        }
     }
 }
 

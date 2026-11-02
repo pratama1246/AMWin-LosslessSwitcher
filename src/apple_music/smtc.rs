@@ -29,8 +29,8 @@ impl SmtcManager {
         if let Ok(sessions) = self.manager.GetSessions() {
             let count = sessions.Size().unwrap_or(0);
             for i in 0..count {
-                if let Ok(session) = sessions.GetAt(i) {
-                    if let Ok(app_id) = session.SourceAppUserModelId() {
+                if let Ok(session) = sessions.GetAt(i)
+                    && let Ok(app_id) = session.SourceAppUserModelId() {
                         let app_id_str = app_id.to_string();
                         let app_id_lower = app_id_str.to_lowercase();
                         if app_id_lower.contains("applemusic") 
@@ -39,7 +39,6 @@ impl SmtcManager {
                             return Some(session);
                         }
                     }
-                }
             }
         }
         // Strict isolation: never fallback to GetCurrentSession()
@@ -91,57 +90,51 @@ impl SmtcManager {
     }
 
     pub fn is_playing(&self, session: &GlobalSystemMediaTransportControlsSession) -> bool {
-        if let Ok(playback_info) = session.GetPlaybackInfo() {
-            if let Ok(status) = playback_info.PlaybackStatus() {
+        if let Ok(playback_info) = session.GetPlaybackInfo()
+            && let Ok(status) = playback_info.PlaybackStatus() {
                 return status == GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing;
             }
-        }
         false
     }
 
     pub fn is_active_or_playing(&self, session: &GlobalSystemMediaTransportControlsSession) -> bool {
-        if let Ok(playback_info) = session.GetPlaybackInfo() {
-            if let Ok(status) = playback_info.PlaybackStatus() {
+        if let Ok(playback_info) = session.GetPlaybackInfo()
+            && let Ok(status) = playback_info.PlaybackStatus() {
                 return status == GlobalSystemMediaTransportControlsSessionPlaybackStatus::Playing
                     || status == GlobalSystemMediaTransportControlsSessionPlaybackStatus::Changing;
             }
-        }
         false
     }
 
     pub fn is_changing(&self, session: &GlobalSystemMediaTransportControlsSession) -> bool {
-        if let Ok(playback_info) = session.GetPlaybackInfo() {
-            if let Ok(status) = playback_info.PlaybackStatus() {
+        if let Ok(playback_info) = session.GetPlaybackInfo()
+            && let Ok(status) = playback_info.PlaybackStatus() {
                 return status == GlobalSystemMediaTransportControlsSessionPlaybackStatus::Changing;
             }
-        }
         false
     }
 
     pub fn is_paused(&self, session: &GlobalSystemMediaTransportControlsSession) -> bool {
-        if let Ok(playback_info) = session.GetPlaybackInfo() {
-            if let Ok(status) = playback_info.PlaybackStatus() {
+        if let Ok(playback_info) = session.GetPlaybackInfo()
+            && let Ok(status) = playback_info.PlaybackStatus() {
                 return status == GlobalSystemMediaTransportControlsSessionPlaybackStatus::Paused;
             }
-        }
         false
     }
 
     pub fn try_pause(&self, session: &GlobalSystemMediaTransportControlsSession) -> bool {
-        if let Ok(op) = session.TryPauseAsync() {
-            if let Ok(success) = op.get() {
+        if let Ok(op) = session.TryPauseAsync()
+            && let Ok(success) = op.get() {
                 return success;
             }
-        }
         false
     }
 
     pub fn try_play(&self, session: &GlobalSystemMediaTransportControlsSession) -> bool {
-        if let Ok(op) = session.TryPlayAsync() {
-            if let Ok(success) = op.get() {
+        if let Ok(op) = session.TryPlayAsync()
+            && let Ok(success) = op.get() {
                 return success;
             }
-        }
         false
     }
 

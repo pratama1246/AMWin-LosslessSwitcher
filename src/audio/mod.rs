@@ -18,7 +18,7 @@ impl AudioFormat {
     }
 
     pub fn display_str(&self) -> String {
-        let khz = if self.sample_rate % 1000 == 0 {
+        let khz = if self.sample_rate.is_multiple_of(1000) {
             format!("{} kHz", self.sample_rate / 1000)
         } else {
             format!("{:.1} kHz", self.sample_rate as f64 / 1000.0)
