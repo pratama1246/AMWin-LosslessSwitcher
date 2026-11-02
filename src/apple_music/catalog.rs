@@ -5,8 +5,6 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use crate::audio::AudioFormat;
 
-const DEFAULT_DEV_TOKEN: &str = "eyJ0eXAiOiJKV1QiLCJhbGciOiJFUzI1NiIsImtpZCI6IkxUMlpEWlNYTlEifQ.eyJpc3MiOiI1SUtQUDJJRUNRIiwiaWF0IjoxNzkyNzgwNTM0LCJleHAiOjE3OTg4Mjg1MzQsInJvb3RfaHR0cHNfb3JpZ2luIjpbImFwcGxlLmNvbSJdfQ.p95fR8Bo64P4CU24a9SZiTMGFO3vefVVu3cRii4QjL0K9MBwNgWzo0o23lTR8MfJW0B7j-qY59jmZ74am3Fqng";
-
 unsafe extern "system" {
     fn GetUserGeoID(geoClass: u32) -> i32;
     fn GetGeoInfoW(location: i32, geoType: u32, lpGeoData: *mut u16, cchData: i32, langId: u16) -> i32;
@@ -59,6 +57,8 @@ struct CachedTrackFormat {
 struct CacheFile {
     version: u32,
     entries: HashMap<String, CachedTrackFormat>,
+    #[serde(default)]
+    dev_token: Option<String>,
 }
 
 #[derive(Clone)]
@@ -92,9 +92,13 @@ impl CatalogResolver {
         }
 
         let mut initial_cache = HashMap::new();
+        let mut initial_token = String::new();
         if let Ok(data) = fs::read_to_string(&cache_path) {
             if let Ok(file) = serde_json::from_str::<CacheFile>(&data) {
                 if file.version == CACHE_VERSION {
+                    if let Some(tok) = file.dev_token {
+                        initial_token = tok;
+                    }
                     for (k, v) in file.entries {
                         if v.sample_rate != 96000 || !v.is_lossless {
                             initial_cache.insert(k, MemoryCachedFormat {
@@ -118,7 +122,7 @@ impl CatalogResolver {
         Self {
             cache_path,
             cache: Mutex::new(initial_cache),
-            token: Mutex::new(DEFAULT_DEV_TOKEN.to_string()),
+            token: Mutex::new(initial_token),
             storefront,
         }
     }
@@ -233,9 +237,18 @@ impl CatalogResolver {
             })
         }).collect();
 
+        let dev_token = self.token.lock().ok().and_then(|t| {
+            if t.trim().is_empty() {
+                None
+            } else {
+                Some(t.clone())
+            }
+        });
+
         let file = CacheFile {
             version: CACHE_VERSION,
             entries,
+            dev_token,
         };
 
         if let Ok(json) = serde_json::to_string_pretty(&file) {
@@ -291,7 +304,22 @@ impl CatalogResolver {
         album: Option<&str>,
         duration_secs: Option<u64>,
     ) -> Option<(AudioFormat, Option<String>, bool)> {
-        let token = self.token.lock().ok()?.clone();
+        let mut token = self.token.lock().ok()?.clone();
+
+        // 0. If token is not yet in cache, fetch it dynamically from Apple Music Web
+        if token.trim().is_empty() {
+            if let Some(new_token) = self.refresh_token() {
+                if let Ok(mut t_guard) = self.token.lock() {
+                    *t_guard = new_token.clone();
+                }
+                if let Ok(cache) = self.cache.lock() {
+                    self.save_cache(&cache);
+                }
+                token = new_token;
+            } else {
+                return None;
+            }
+        }
 
         // 1. Try Apple Music Catalog search
         if let Some(res) = self.search_and_evaluate(artist, title, album, duration_secs, &token) {
@@ -302,6 +330,9 @@ impl CatalogResolver {
         if let Some(new_token) = self.refresh_token() {
             if let Ok(mut t_guard) = self.token.lock() {
                 *t_guard = new_token.clone();
+            }
+            if let Ok(cache) = self.cache.lock() {
+                self.save_cache(&cache);
             }
             return self.search_and_evaluate(artist, title, album, duration_secs, &new_token);
         }
@@ -592,7 +623,23 @@ impl CatalogResolver {
         if let Some(pos) = js_content.find("u_e=\"") {
             let sub = &js_content[pos + 5..];
             if let Some(end) = sub.find('"') {
-                return Some(sub[..end].to_string());
+                let candidate = &sub[..end];
+                if candidate.split('.').count() == 3 && candidate.len() > 100 {
+                    return Some(candidate.to_string());
+                }
+            }
+        }
+
+        // Resilient fallback: locate token pattern directly within the bundle
+        for marker in &["\"eyJh", "\"eyJ0"] {
+            if let Some(pos) = js_content.find(marker) {
+                let sub = &js_content[pos + 1..];
+                if let Some(end) = sub.find('"') {
+                    let candidate = &sub[..end];
+                    if candidate.split('.').count() == 3 && candidate.len() > 100 {
+                        return Some(candidate.to_string());
+                    }
+                }
             }
         }
 
