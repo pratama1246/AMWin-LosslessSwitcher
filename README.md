@@ -17,11 +17,11 @@
 
 ## Overview
 
-Apple Music for Windows does not provide an option to automatically change the Windows audio endpoint format for each track. As a result, the output device may remain configured to a single sample rate and bit depth while Apple Music plays tracks with different formats.
+Apple Music for Windows does not automatically adjust the Windows audio endpoint format to match each track's native sample rate. As a result, the output device typically stays locked at a single static sample rate and bit depth in Windows Settings, causing the Windows Audio Engine to resample playback streams.
 
-**AMWin-LosslessSwitcher** is a lightweight Windows utility that follows Apple Music playback and changes the selected Windows audio endpoint format based on track metadata. It uses Windows System Media Transport Controls (SMTC) to detect playback information and resolves track format information using Apple Music Web and iTunes metadata.
+**AMWin-LosslessSwitcher** is a lightweight, non-intrusive Windows utility that follows Apple Music playback and automatically synchronizes the selected Windows audio endpoint format with the active track. It uses a **hybrid detection engine** combining Windows System Media Transport Controls (SMTC), Apple Music Catalog metadata, and real-time Event Tracing for Windows (ETW) telemetry emitted by Apple Music's native playback agent (`AMPLibraryAgent.exe`).
 
-The application changes the Windows endpoint format; it does not decode, capture, or modify Apple Music audio.
+The application strictly changes the Windows endpoint format; it does not intercept, capture, re-encode, or alter the audio stream.
 
 <div align="center">
   <img width="320" alt="LosslessSwitcher For Apple Music main window" src="https://github.com/user-attachments/assets/8c8e2c54-0a2f-43cc-afd9-5cb99100e0c1" />
@@ -30,24 +30,53 @@ The application changes the Windows endpoint format; it does not decode, capture
 
 ## Features
 
-- **Automatic format switching** — Adjusts the selected Windows audio endpoint when the detected track format changes.
-- **Seamless Mode** — Keeps the endpoint bit depth at 24-bit while following the track sample rate.
-- **Purist Mode** — Follows both the track sample rate and bit depth.
-- **Output device selection** — Select a specific audio endpoint or use the Windows default device.
-- **Hardware format checking** — Checks whether the selected endpoint supports a requested format and handles unsupported formats.
-- **Adjustable settling delay** — Configure a delay to accommodate audio devices when changing formats.
-- **System tray support** — Keep the utility running in the background.
-- **Settings persistence** — Saves application preferences between launches.
-- **Portable mode** — Run the executable without installing the application.
+- **Hybrid Detection Engine** — Combines Apple Music catalog metadata with real-time local decoder telemetry (ETW) from `AMPLibraryAgent.exe` for exact format resolution (44.1, 48, 88.2, 96, 176.4, 192 kHz; 16-bit / 24-bit).
+- **Automatic Endpoint Switching** — Changes the selected Windows audio endpoint when track sample rate changes, avoiding unnecessary OS-level resampling.
+- **Seamless Mode** — Keeps the endpoint bit depth at 24-bit while matching track sample rates (recommended for modern DACs).
+- **Purist Mode** — Follows both the track sample rate and bit depth strictly.
+- **Hardware Validation & Auto-Clamping** — Queries WASAPI drivers to verify supported formats and automatically clamps to the maximum hardware capability if a track exceeds device limits.
+- **Smart Settling Delay** — Configurable delay (50–800 ms) with automatic PLL headroom for clock family transitions (44.1k ↔ 48k multiplier transitions).
+- **System Tray Support** — Minimizes unobtrusively to the system tray with live track information.
+- **Zero Admin Privileges** — Operates entirely under standard user privileges without background consoles or driver hooking.
+- **Portable Mode Support** — Option to run as a single self-contained executable with adjacent config storage.
 
 ## How It Works
 
-1. AMWin-LosslessSwitcher detects the active Apple Music session through Windows SMTC.
-2. It uses track information to look up matching metadata from Apple Music Web and iTunes.
-3. The resolved sample rate and bit depth are used as the target Windows audio endpoint format.
-4. The application checks whether the selected endpoint supports the requested format before applying the change.
+AMWin-LosslessSwitcher uses a multi-stage **hybrid detection engine** to resolve the exact audio parameters of each song playing in Apple Music for Windows:
 
-The format shown by the application is based on matched metadata. It is not a direct measurement of the decoded audio stream or the signal received by the DAC.
+```mermaid
+flowchart TD
+    SMTC[Windows SMTC: Track Change] --> Metadata[Query Apple Music Catalog API]
+    Metadata --> GetID[Resolve Track ID adamID & Traits]
+    
+    AMWin[Apple Music Windows cmplayer] -->|Writes Real-Time ETW Logs| ETL[Local .etl Traces]
+    ETL -->|Incremental Parse via tracerpt| ETW[ETW Reader]
+    ETW -->|Extract asbdSampleRate & sdBitDepth| FormatMap[Verified Decoder Telemetry]
+
+    GetID --> Correlate{Correlate adamID with Decoder Log}
+    FormatMap --> Correlate
+
+    Correlate -->|Exact Match Verified| Switch[Switch Audio Endpoint via PolicyConfig / WASAPI]
+    Correlate -->|Pending Decoder Flush| Fallback[Apply Initial Catalog Estimate]
+    Fallback -->|Telemetry Arrives within ~200ms| AutoRefine[Auto-Refine Endpoint to Exact Rate]
+```
+
+1. **Session & Track Detection (Windows SMTC):**  
+   Monitors Windows System Media Transport Controls to detect track transitions instantly, updating the UI title, artist, and album artwork with zero lag.
+2. **Catalog Metadata Correlation (Apple Music Web API):**  
+   Resolves the unique Apple Music Track ID (`adamID`), audio traits (`lossless`, `hi-res-lossless`), and artwork URLs via Apple's catalog API.
+3. **Native Decoder Telemetry Snooping (Local ETW):**  
+   When Apple Music Windows plays a track, its internal CoreMedia player (`cmplayer`) logs diagnostic telemetry to local Windows Event Tracing (`.etl`) files. AMWin-LosslessSwitcher reads these events incrementally and silently (`CREATE_NO_WINDOW`) to extract the exact decoded stream specification (`asbdFormatID = qlac`, `sdFormatID = alac`, exact `asbdSampleRate` such as `96.0 kHz` or `192.0 kHz`, and `sdBitDepth`).
+4. **Hardware Verification & Switching (WASAPI / PolicyConfig):**  
+   The resolved format is validated against the active DAC's supported candidate formats. If supported, the application synchronizes the Windows audio endpoint format and applies an intelligent settling delay to allow the DAC's PLL clock to stabilize.
+
+> [!IMPORTANT]
+> **Sample Rate Synchronization vs. "Bit-Perfect" Audio**  
+> AMWin-LosslessSwitcher performs **strict sample rate and bit depth matching** at the Windows audio endpoint level so that the Windows Audio Engine does not apply unnecessary resampling.  
+> However, **this is NOT bit-perfect audio and NOT Exclusive Mode**:
+> - Apple Music for Windows streams through the **Windows Shared Audio Engine** (WASAPI Shared).
+> - System volume sliders, system notification sounds, Windows audio enhancements, driver DSPs, and third-party equalizers can still affect or mix with the digital audio stream.
+> - This utility aims to eliminate OS sample rate conversion (SRC) in Shared Mode, but does not bypass the Windows audio stack.
 
 ## Installation
 
@@ -101,11 +130,10 @@ The exact settings available may vary by Apple Music and Windows version.
 
 ## Known Limitations
 
-- **No Exclusive Mode:** Apple Music for Windows does not expose an Exclusive Mode option through this utility. Playback continues through the Windows Shared Audio Engine.
-- **No bit-perfect guarantee:** Changing the Windows endpoint format does not guarantee bit-perfect output. Other applications, system sounds, Windows audio processing, volume controls, drivers, and device behavior may affect the final signal.
-- **Metadata-based format information:** The target format is resolved from Apple Music Web and iTunes metadata. It is not read directly from the decoded audio stream.
-- **Device and driver support:** Available formats and switching behavior depend on the selected audio endpoint and its driver. Unsupported formats may not be applied.
-- **Track matching:** Metadata lookup depends on matching the detected track information with Apple's catalog entries. Incorrect or unavailable matches may affect the resolved format.
+- **No Exclusive Mode (WASAPI Shared Only):** Apple Music for Windows does not support WASAPI Exclusive Mode or ASIO. Playback routes through the Windows Shared Audio Engine.
+- **No Bit-Perfect Guarantee:** Synchronizing the endpoint format prevents sample rate conversion (resampling) in the Windows Audio Engine, but does not guarantee a bit-perfect bitstream. System volume, notification sounds, Windows audio enhancements, and driver-level mixers still operate on the audio stream.
+- **Device & Driver Behavior:** Switching speed and accepted formats depend on your DAC's audio driver. Unsupported formats are automatically clamped to the device's hardware maximum.
+- **Initial Telemetry Latency:** When playing an uncached track for the very first time, `AMPLibraryAgent.exe` may take 100–300 ms to flush its decoder log to disk. AMWin-LosslessSwitcher handles this by applying an initial catalog estimate and automatically refining the endpoint format once the verified telemetry arrives.
 
 ## Tested Hardware
 
