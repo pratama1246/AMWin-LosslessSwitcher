@@ -20,21 +20,21 @@ use windows::Win32::UI::Controls::{
 };
 use windows::Win32::UI::Shell::{
     Shell_NotifyIconW, NOTIFYICONDATAW, NOTIFY_ICON_DATA_FLAGS, NOTIFY_ICON_INFOTIP_FLAGS,
-    NIM_ADD, NIM_DELETE, NIF_ICON, NIF_MESSAGE, NIF_TIP,
+    NIM_ADD, NIM_DELETE, NIF_ICON, NIF_MESSAGE, NIF_TIP, ShellExecuteW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW, LoadCursorW, LoadIconW,
     PostQuitMessage, RegisterClassExW, SendMessageW, SetTimer, ShowWindow, TranslateMessage,
     CreatePopupMenu, AppendMenuW, TrackPopupMenu, DestroyMenu, SetForegroundWindow, DestroyWindow,
     SetWindowPos, HWND_TOPMOST, HWND_NOTOPMOST, SWP_NOMOVE, SWP_NOSIZE, WS_CLIPCHILDREN,
-    SIZE_MINIMIZED, WM_SIZE, BM_GETCHECK, BS_AUTOCHECKBOX,
+    WM_SIZE, BM_GETCHECK, BS_AUTOCHECKBOX,
     CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, HICON, HMENU, IDC_ARROW, IDI_APPLICATION,
-    MSG, SW_HIDE, SW_RESTORE, SW_SHOW, TPM_BOTTOMALIGN, TPM_LEFTALIGN,
+    MSG, SW_HIDE, SW_RESTORE, SW_SHOW, SW_SHOWNORMAL, TPM_BOTTOMALIGN, TPM_LEFTALIGN,
     WINDOW_EX_STYLE, WNDCLASSEXW, WS_CHILD, WS_GROUP, WS_OVERLAPPED, WS_CAPTION,
     WS_SYSMENU, WS_MINIMIZEBOX, WS_VISIBLE, WM_CLOSE, WM_COMMAND, WM_CREATE,
     WM_DESTROY, WM_HSCROLL, WM_RBUTTONUP, WM_LBUTTONDBLCLK, WM_SETFONT,
     WM_SYSCOMMAND, WM_TIMER, WM_USER, WM_CTLCOLORSTATIC, WM_CTLCOLORBTN, WM_CTLCOLORDLG,
-    SC_MINIMIZE, MF_STRING, MF_CHECKED, MF_UNCHECKED,
+    MF_STRING, MF_CHECKED, MF_UNCHECKED,
     MF_SEPARATOR, BM_SETCHECK, CB_ADDSTRING, CB_GETCURSEL, CB_SETCURSEL,
     CB_RESETCONTENT, WM_SETICON, SWP_NOZORDER, SWP_NOACTIVATE, WM_GETFONT,
 };
@@ -65,6 +65,7 @@ const ID_BTN_CLEAR_CACHE: isize = 208;
 const ID_BTN_CLEAR_CACHE_ABOUT: isize = 209;
 const ID_CHK_ALWAYS_ON_TOP: isize = 210;
 const ID_CHK_STARTUP: isize = 211;
+const ID_BTN_GITHUB: isize = 212;
 
 const ID_TRAY_OPEN: usize = 301;
 const ID_TRAY_SEAMLESS: usize = 302;
@@ -273,7 +274,7 @@ pub fn run_app() {
 
         let start_in_tray = std::env::args().any(|a| a == "--minimized" || a == "--tray");
 
-        let window_title = w!("LosslessSwitcher for Apple Music");
+        let window_title = w!("LosslessSwitcher For Apple Music");
         let hwnd = CreateWindowExW(
             WINDOW_EX_STYLE(0),
             class_name,
@@ -564,6 +565,18 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                         }
                     }
                 }
+                ID_BTN_GITHUB => {
+                    let _ = unsafe {
+                        ShellExecuteW(
+                            HWND::default(),
+                            w!("open"),
+                            w!("https://github.com/pratama1246/AMWin-LosslessSwitcher"),
+                            PCWSTR::null(),
+                            PCWSTR::null(),
+                            SW_SHOWNORMAL,
+                        )
+                    };
+                }
                 _ => {
                     let menu_id = wparam.0;
                     match menu_id {
@@ -666,31 +679,18 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             LRESULT(0)
         }
         WM_SIZE => {
-            if wparam.0 == SIZE_MINIMIZED as usize {
-                let _ = ShowWindow(hwnd, SW_HIDE);
-                if let Ok(mut guard) = APP_STATE.lock() {
-                    if let Some(ref mut state) = *guard {
-                        state.is_in_tray = true;
-                    }
-                }
-                return LRESULT(0);
-            }
             DefWindowProcW(hwnd, msg, wparam, lparam)
         }
         WM_SYSCOMMAND => {
-            if (wparam.0 & 0xFFF0) == SC_MINIMIZE as usize {
-                let _ = ShowWindow(hwnd, SW_HIDE);
-                if let Ok(mut guard) = APP_STATE.lock() {
-                    if let Some(ref mut state) = *guard {
-                        state.is_in_tray = true;
-                    }
-                }
-                return LRESULT(0);
-            }
             DefWindowProcW(hwnd, msg, wparam, lparam)
         }
         WM_CLOSE => {
-            let _ = DestroyWindow(hwnd);
+            let _ = ShowWindow(hwnd, SW_HIDE);
+            if let Ok(mut guard) = APP_STATE.lock() {
+                if let Some(ref mut state) = *guard {
+                    state.is_in_tray = true;
+                }
+            }
             LRESULT(0)
         }
         WM_TRAY_ICON => {
@@ -867,9 +867,9 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
     );
     SendMessageW(label_status, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
 
-    // Minimize button placed neatly at bottom-left directly under album artwork
+    // Hide to Tray button placed neatly at bottom-left directly under album artwork
     let btn_min = create_ctrl(
-        w!("BUTTON"), w!("Minimize to Tray"),
+        w!("BUTTON"), w!("Hide to Tray"),
         WS_CHILD | WS_VISIBLE | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(windows::Win32::UI::WindowsAndMessaging::BS_PUSHBUTTON as u32),
         scale_val(28, scale), scale_val(212, scale), artwork_size, scale_val(32, scale), parent, Some(ID_BTN_MINIMIZE), hinstance,
     );
@@ -1017,7 +1017,7 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
     // ==========================================
     // 1. Judul
     let label_app_title = create_ctrl(
-        w!("STATIC"), w!("LosslessSwitcher for Apple Music"),
+        w!("STATIC"), w!("LosslessSwitcher For Apple Music"),
         WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX),
         scale_val(40, scale), scale_val(62, scale), scale_val(408, scale), scale_val(22, scale), parent, None, hinstance,
     );
@@ -1025,7 +1025,7 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
 
     // 2. Version
     let label_app_version = create_ctrl(
-        w!("STATIC"), w!("Version 0.1.0 (Native 64-bit Windows)"),
+        w!("STATIC"), w!("Version 0.2.0 (Native 64-bit Windows)"),
         WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX),
         scale_val(40, scale), scale_val(86, scale), scale_val(408, scale), scale_val(16, scale), parent, None, hinstance,
     );
@@ -1069,13 +1069,21 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
 
     // 7. Logo Copyright (simbol ©) + All rights reserved
     let label_app_copyright = create_ctrl(
-        w!("STATIC"), w!("© 2026 Pratama Putra. All rights reserved."),
+        w!("STATIC"), w!("Developed by Pratama Putra © 2026. All rights reserved."),
         WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX),
-        scale_val(40, scale), scale_val(238, scale), scale_val(300, scale), scale_val(16, scale), parent, None, hinstance,
+        scale_val(40, scale), scale_val(238, scale), scale_val(408, scale), scale_val(16, scale), parent, None, hinstance,
     );
     SendMessageW(label_app_copyright, WM_SETFONT, WPARAM(font_sub.0 as usize), LPARAM(1));
 
-    // 8. Clear Cache button
+    // 8. GitHub button
+    let btn_github = create_ctrl(
+        w!("BUTTON"), w!("GitHub"),
+        WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(windows::Win32::UI::WindowsAndMessaging::BS_PUSHBUTTON as u32),
+        scale_val(40, scale), scale_val(258, scale), scale_val(105, scale), scale_val(28, scale), parent, Some(ID_BTN_GITHUB), hinstance,
+    );
+    SendMessageW(btn_github, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
+
+    // 9. Clear Cache button
     let btn_clear_cache_about = create_ctrl(
         w!("BUTTON"), w!("Clear Cache"),
         WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(windows::Win32::UI::WindowsAndMessaging::BS_PUSHBUTTON as u32),
@@ -1091,6 +1099,7 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
         label_app_optimized,
         label_app_disclaimer,
         label_app_copyright,
+        btn_github,
         btn_clear_cache_about,
     ];
 
@@ -1310,13 +1319,17 @@ unsafe fn update_status_display() {
             };
             set_window_text(state.label_track, &track_text);
 
-            let target_str = status.target_format.map(|f| f.display_str()).unwrap_or_else(|| "-".to_string());
+            let target_str = if !status.is_lossless {
+                "AAC (Lossy)".to_string()
+            } else {
+                status.target_format.map(|f| f.display_str()).unwrap_or_else(|| "-".to_string())
+            };
             let dev_str = status.current_device_format.map(|f| f.display_str()).unwrap_or_else(|| "-".to_string());
             let fmt_text = format!("Source: {}\nDAC: {}", target_str, dev_str);
             set_window_text(state.label_formats, &fmt_text);
 
-            let status_msg = if status.status_message.chars().count() > 38 {
-                let tr: String = status.status_message.chars().take(35).collect();
+            let status_msg = if status.status_message.chars().count() > 56 {
+                let tr: String = status.status_message.chars().take(53).collect();
                 format!("{}...", tr.trim_end())
             } else {
                 status.status_message.clone()
@@ -1327,10 +1340,17 @@ unsafe fn update_status_display() {
             if let Some(cur_fmt) = status.current_device_format {
                 if !status.is_syncing && state.last_notified_fmt != Some(cur_fmt) {
                     if state.last_notified_fmt.is_some() {
+                        let note_msg = if !status.is_lossless {
+                            format!("Output: {} (AAC Lossy)", cur_fmt.display_str())
+                        } else if status.status_message.contains("(Clamped)") {
+                            format!("Output: {} (Clamped)", cur_fmt.display_str())
+                        } else {
+                            format!("Output: {}", cur_fmt.display_str())
+                        };
                         show_native_notification(
                             state.main_hwnd,
                             "DAC Format Switched",
-                            &format!("Output: {}", cur_fmt.display_str()),
+                            &note_msg,
                         );
                     }
                     state.last_notified_fmt = Some(cur_fmt);
@@ -1515,7 +1535,7 @@ unsafe fn add_tray_icon(hwnd: HWND) {
         hIcon: app_icon,
         ..Default::default()
     };
-    let tip = w!("LosslessSwitcher-AM");
+    let tip = w!("LosslessSwitcher For Apple Music");
     let tip_slice = tip.as_wide();
     let copy_len = tip_slice.len().min(nid.szTip.len() - 1);
     std::ptr::copy_nonoverlapping(tip_slice.as_ptr(), nid.szTip.as_mut_ptr(), copy_len);
@@ -1581,7 +1601,7 @@ unsafe fn show_tray_context_menu(hwnd: HWND) {
         .unwrap_or((SwitcherMode::Seamless, false));
     let is_startup = is_startup_enabled();
 
-    let _ = AppendMenuW(menu, MF_STRING, ID_TRAY_OPEN, w!("Open LosslessSwitcher-AM"));
+    let _ = AppendMenuW(menu, MF_STRING, ID_TRAY_OPEN, w!("Open LosslessSwitcher For Apple Music"));
     let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
 
     let top_flag = if is_top { MF_CHECKED } else { MF_UNCHECKED };

@@ -20,6 +20,7 @@ pub struct CoordinatorStatus {
     pub artwork_bytes: Option<Vec<u8>>,
     pub status_message: String,
     pub is_syncing: bool,
+    pub is_lossless: bool,
     pub mode: SwitcherMode,
     pub settling_delay_ms: u64,
 }
@@ -41,6 +42,7 @@ impl Coordinator {
             artwork_bytes: None,
             status_message: "Initializing...".to_string(),
             is_syncing: false,
+            is_lossless: true,
             mode,
             settling_delay_ms,
         }));
@@ -274,6 +276,7 @@ impl Coordinator {
                         let resolution = catalog.resolve_track(&track.artist, &track.title, album_opt, track.duration_secs);
                         let raw_target_fmt = resolution.format;
                         let artwork_bytes = track.smtc_artwork_bytes.clone().or(resolution.artwork_bytes);
+                        let is_lossless = resolution.is_lossless;
 
                         let requested_fmt = match mode {
                             SwitcherMode::Seamless => {
@@ -333,7 +336,12 @@ impl Coordinator {
                                 st.target_format = Some(raw_target_fmt);
                                 st.artwork_bytes = artwork_bytes.clone();
                                 st.current_device_format = current_dev_fmt;
-                                st.status_message = format!("Syncing to {}...", effective_target_fmt.display_str());
+                                st.is_lossless = is_lossless;
+                                if !is_lossless {
+                                    st.status_message = format!("Syncing to {} (AAC Lossy)...", effective_target_fmt.display_str());
+                                } else {
+                                    st.status_message = format!("Syncing to {}...", effective_target_fmt.display_str());
+                                }
                             }
 
                             let should_resume = is_active || is_new_track;
@@ -419,23 +427,34 @@ impl Coordinator {
                                 Err(_) => (None, false),
                             };
 
-                            last_processed_track_key = track_key.clone();
-                            last_applied_fmt = applied_fmt.or(Some(effective_target_fmt));
-
                             let new_current_fmt = policy_config.get_device_format(&active_device_id).ok()
                                 .or_else(|| wasapi.get_current_format(&active_device_id).ok());
+
+                            if applied_fmt.is_some() {
+                                last_processed_track_key = track_key.clone();
+                                last_applied_fmt = applied_fmt;
+                            } else {
+                                // Clear cached candidate list so the next poll re-evaluates cleanly
+                                resolve_cache = None;
+                            }
+
                             {
                                 let mut st = status_arc.lock().unwrap();
                                 st.is_syncing = false;
                                 st.current_track = Some(track.clone());
                                 st.target_format = Some(raw_target_fmt);
                                 st.current_device_format = new_current_fmt;
+                                st.is_lossless = is_lossless;
                                 if let Some(applied) = applied_fmt {
-                                    if is_clamped {
-                                        st.status_message = format!("Synchronized: {} (Hardware Clamped)", applied.display_str());
+                                    if !is_lossless {
+                                        st.status_message = format!("Synchronized: {} (AAC Lossy)", applied.display_str());
+                                    } else if is_clamped {
+                                        st.status_message = format!("Synchronized: {} (Clamped)", applied.display_str());
                                     } else {
                                         st.status_message = format!("Synchronized: {}", applied.display_str());
                                     }
+                                } else if let Some(cur) = new_current_fmt {
+                                    st.status_message = format!("Retrying sync ({})...", cur.display_str());
                                 } else {
                                     st.status_message = "Audio endpoint unsupported".to_string();
                                 }
@@ -447,9 +466,18 @@ impl Coordinator {
                             st.target_format = Some(raw_target_fmt);
                             st.artwork_bytes = artwork_bytes;
                             st.current_device_format = current_dev_fmt;
+                            st.is_lossless = is_lossless;
                             if !needs_switch {
-                                let disp = current_dev_fmt.map(|f| f.display_str()).unwrap_or_else(|| effective_target_fmt.display_str());
-                                st.status_message = format!("Synchronized ({})", disp);
+                                let disp_fmt = current_dev_fmt.unwrap_or(effective_target_fmt);
+                                let is_cur_clamped = disp_fmt.sample_rate < requested_fmt.sample_rate 
+                                    || disp_fmt.bit_depth < requested_fmt.bit_depth;
+                                if !is_lossless {
+                                    st.status_message = format!("Synchronized: {} (AAC Lossy)", disp_fmt.display_str());
+                                } else if is_cur_clamped {
+                                    st.status_message = format!("Synchronized: {} (Clamped)", disp_fmt.display_str());
+                                } else {
+                                    st.status_message = format!("Synchronized: {}", disp_fmt.display_str());
+                                }
                             }
                         }
                     }
@@ -458,6 +486,7 @@ impl Coordinator {
                         st.current_track = None;
                         st.target_format = None;
                         st.artwork_bytes = None;
+                        st.is_lossless = true;
                         st.current_device_format = current_dev_fmt;
                         st.status_message = "Waiting for Apple Music playback...".to_string();
                     }

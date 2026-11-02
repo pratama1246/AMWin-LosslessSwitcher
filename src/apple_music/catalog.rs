@@ -43,24 +43,32 @@ pub fn get_system_storefront() -> String {
     "us".to_string()
 }
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Serialize, Deserialize, Clone)]
 struct CachedTrackFormat {
     sample_rate: u32,
     bit_depth: u16,
     #[serde(default)]
     artwork_url: Option<String>,
+    #[serde(default = "default_true")]
+    is_lossless: bool,
 }
 
 #[derive(Clone)]
 struct MemoryCachedFormat {
     format: AudioFormat,
     artwork_url: Option<String>,
+    is_lossless: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TrackResolution {
     pub format: AudioFormat,
     pub artwork_bytes: Option<Vec<u8>>,
+    pub is_lossless: bool,
 }
 
 pub struct CatalogResolver {
@@ -86,6 +94,7 @@ impl CatalogResolver {
                     initial_cache.insert(k, MemoryCachedFormat {
                         format: AudioFormat::new(v.sample_rate, v.bit_depth),
                         artwork_url: v.artwork_url,
+                        is_lossless: v.is_lossless,
                     });
                 }
             }
@@ -123,34 +132,39 @@ impl CatalogResolver {
         };
         let fallback_key = format!("{}|{}", clean_art.to_lowercase(), clean_tit.to_lowercase());
 
-        let (format, art_url) = {
+        let (format, art_url, is_lossless) = {
             let mut found = None;
             if let Ok(cache) = self.cache.lock() {
                 if let Some(entry) = cache.get(&cache_key) {
-                    found = Some((entry.format, entry.artwork_url.clone()));
+                    found = Some((entry.format, entry.artwork_url.clone(), entry.is_lossless));
                 } else if cache_key != fallback_key {
                     if let Some(entry) = cache.get(&fallback_key) {
-                        found = Some((entry.format, entry.artwork_url.clone()));
+                        found = Some((entry.format, entry.artwork_url.clone(), entry.is_lossless));
                     }
                 }
             }
 
             match found {
-                Some((fmt, Some(art))) => (fmt, Some(art)),
+                Some((fmt, art, lossless)) if art.is_some() || !lossless => (fmt, art, lossless),
                 _ => {
                     let album_arg = if clean_alb.is_empty() { None } else { Some(clean_alb.as_str()) };
-                    let resolved = self.fetch_catalog_format(&clean_art, &clean_tit, album_arg, duration_secs)
-                        .unwrap_or_else(|| (found.map(|(f, _)| f).unwrap_or(AudioFormat::new(44100, 16)), None));
+                    let fetched = self.fetch_catalog_format(&clean_art, &clean_tit, album_arg, duration_secs);
 
-                    if let Ok(mut cache) = self.cache.lock() {
-                        cache.insert(cache_key.clone(), MemoryCachedFormat {
-                            format: resolved.0,
-                            artwork_url: resolved.1.clone(),
-                        });
-                        self.save_cache(&cache);
+                    if let Some(resolved) = fetched {
+                        if let Ok(mut cache) = self.cache.lock() {
+                            cache.insert(cache_key.clone(), MemoryCachedFormat {
+                                format: resolved.0,
+                                artwork_url: resolved.1.clone(),
+                                is_lossless: resolved.2,
+                            });
+                            self.save_cache(&cache);
+                        }
+                        resolved
+                    } else {
+                        // Keep previously cached entry if present, otherwise default to 44.1/16 lossless
+                        // Do not persist failed lookups into catalog_cache.json
+                        found.unwrap_or((AudioFormat::new(44100, 16), None, true))
                     }
-
-                    resolved
                 }
             }
         };
@@ -160,6 +174,7 @@ impl CatalogResolver {
         TrackResolution {
             format,
             artwork_bytes,
+            is_lossless,
         }
     }
 
@@ -190,12 +205,36 @@ impl CatalogResolver {
                 sample_rate: v.format.sample_rate,
                 bit_depth: v.format.bit_depth,
                 artwork_url: v.artwork_url.clone(),
+                is_lossless: v.is_lossless,
             })
         }).collect();
 
         if let Ok(json) = serde_json::to_string_pretty(&to_save) {
             let _ = fs::write(&self.cache_path, json);
         }
+    }
+
+    fn search_amp_api(&self, query: &str, storefront: &str, token: &str, limit: usize) -> Option<Vec<serde_json::Value>> {
+        let url = format!(
+            "https://amp-api.music.apple.com/v1/catalog/{}/search?term={}&types=songs&limit={}",
+            storefront,
+            urlencoding(query),
+            limit
+        );
+
+        let resp = ureq::get(&url)
+            .set("Authorization", &format!("Bearer {}", token))
+            .set("Origin", "https://music.apple.com")
+            .set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
+            .timeout(std::time::Duration::from_secs(4))
+            .call().ok()?;
+
+        let json: serde_json::Value = resp.into_json().ok()?;
+        json.get("results")?
+            .get("songs")?
+            .get("data")?
+            .as_array()
+            .cloned()
     }
 
     fn search_itunes(&self, query: &str, country: Option<&str>, limit: usize) -> Option<Vec<serde_json::Value>> {
@@ -222,9 +261,68 @@ impl CatalogResolver {
         title: &str,
         album: Option<&str>,
         duration_secs: Option<u64>,
-    ) -> Option<(AudioFormat, Option<String>)> {
-        // Step 1: If album is specified, try searching with album name first for high precision
-        let mut results = if let Some(alb) = album {
+    ) -> Option<(AudioFormat, Option<String>, bool)> {
+        let token = self.token.lock().ok()?.clone();
+
+        // 1. Try Apple Music Catalog search
+        if let Some(res) = self.search_and_evaluate(artist, title, album, duration_secs, &token) {
+            return Some(res);
+        }
+
+        // 2. Refresh dev token if expired and retry
+        if let Some(new_token) = self.refresh_token() {
+            if let Ok(mut t_guard) = self.token.lock() {
+                *t_guard = new_token.clone();
+            }
+            return self.search_and_evaluate(artist, title, album, duration_secs, &new_token);
+        }
+
+        None
+    }
+
+    fn search_and_evaluate(
+        &self,
+        artist: &str,
+        title: &str,
+        album: Option<&str>,
+        duration_secs: Option<u64>,
+        token: &str,
+    ) -> Option<(AudioFormat, Option<String>, bool)> {
+        // Step 1: If album is specified, search AMP API with artist + title + album for maximum precision
+        if let Some(alb) = album {
+            let q_album = format!("{} {} {}", artist, title, alb);
+            if let Some(results) = self.search_amp_api(&q_album, &self.storefront, token, 10) {
+                if !results.is_empty() {
+                    if let Some(res) = self.evaluate_candidates(&results, artist, title, album, duration_secs, token) {
+                        return Some(res);
+                    }
+                }
+            }
+        }
+
+        // Step 2: Search AMP API with standard query (artist + title)
+        let q_standard = format!("{} {}", artist, title);
+        if let Some(results) = self.search_amp_api(&q_standard, &self.storefront, token, 15) {
+            if !results.is_empty() {
+                if let Some(res) = self.evaluate_candidates(&results, artist, title, album, duration_secs, token) {
+                    return Some(res);
+                }
+            }
+        }
+
+        // Step 3: Search AMP API in US storefront if regional storefront yielded no match
+        if self.storefront != "us" {
+            if let Some(results) = self.search_amp_api(&q_standard, "us", token, 15) {
+                if !results.is_empty() {
+                    if let Some(res) = self.evaluate_candidates(&results, artist, title, album, duration_secs, token) {
+                        return Some(res);
+                    }
+                }
+            }
+        }
+
+        // Step 4: Fallback to iTunes Search API (in case AMP API is rate-limited or unreachable)
+        let mut itunes_results = if let Some(alb) = album {
             let q_album = format!("{} {} {}", artist, title, alb);
             self.search_itunes(&q_album, Some(&self.storefront), 10)
                 .filter(|res| !res.is_empty())
@@ -232,33 +330,20 @@ impl CatalogResolver {
             None
         };
 
-        // Step 2: Fallback to querying artist + title with broader limit if album-specific search was empty
-        if results.is_none() {
-            let q_standard = format!("{} {}", artist, title);
-            results = self.search_itunes(&q_standard, Some(&self.storefront), 15);
-            if results.as_ref().map_or(true, |v| v.is_empty()) && self.storefront != "us" {
-                results = self.search_itunes(&q_standard, Some("us"), 15);
+        if itunes_results.is_none() {
+            itunes_results = self.search_itunes(&q_standard, Some(&self.storefront), 15);
+            if itunes_results.as_ref().map_or(true, |v| v.is_empty()) && self.storefront != "us" {
+                itunes_results = self.search_itunes(&q_standard, Some("us"), 15);
             }
-            if results.as_ref().map_or(true, |v| v.is_empty()) {
-                results = self.search_itunes(&q_standard, None, 15);
+            if itunes_results.as_ref().map_or(true, |v| v.is_empty()) {
+                itunes_results = self.search_itunes(&q_standard, None, 15);
             }
         }
 
-        let results = results?;
-        let token = self.token.lock().ok()?.clone();
-
-        // Step 3: Score candidates for album and duration accuracy
-        let evaluated = self.evaluate_candidates(&results, artist, title, album, duration_secs, &token);
-        if evaluated.is_some() {
-            return evaluated;
-        }
-
-        // Step 4: Token refresh fallback if token was invalid/expired
-        if let Some(new_token) = self.refresh_token() {
-            if let Ok(mut t_guard) = self.token.lock() {
-                *t_guard = new_token.clone();
+        if let Some(results) = itunes_results {
+            if let Some(res) = self.evaluate_candidates(&results, artist, title, album, duration_secs, token) {
+                return Some(res);
             }
-            return self.evaluate_candidates(&results, artist, title, album, duration_secs, &new_token);
         }
 
         None
@@ -272,7 +357,7 @@ impl CatalogResolver {
         album: Option<&str>,
         duration_secs: Option<u64>,
         token: &str,
-    ) -> Option<(AudioFormat, Option<String>)> {
+    ) -> Option<(AudioFormat, Option<String>, bool)> {
         let mut scored_candidates = Vec::new();
         for r in results {
             if let Some(score) = score_candidate(r, artist, title, album, duration_secs) {
@@ -283,14 +368,25 @@ impl CatalogResolver {
         // Sort descending by score (highest match score first)
         scored_candidates.sort_by(|a, b| b.0.cmp(&a.0));
 
-        let mut best: Option<(i32, AudioFormat, Option<String>)> = None;
+        let mut best: Option<(i32, AudioFormat, Option<String>, bool)> = None;
 
         for (score, r) in scored_candidates {
-            let cand_itunes_art = r.get("artworkUrl100")
-                .and_then(|v| v.as_str())
-                .map(|s| s.replace("100x100", "600x600"));
+            let cand_art = r.get("attributes")
+                .and_then(|a| a.get("artwork"))
+                .and_then(|a| a.get("url"))
+                .and_then(|u| u.as_str())
+                .map(|s| s.replace("{w}x{h}", "600x600"))
+                .or_else(|| {
+                    r.get("artworkUrl100")
+                        .and_then(|v| v.as_str())
+                        .map(|s| s.replace("100x100", "600x600"))
+                });
 
-            if let Some(track_id) = r.get("trackId").and_then(|id| id.as_i64()) {
+            let track_id = r.get("id")
+                .and_then(|id| id.as_str().and_then(|s| s.parse::<i64>().ok()).or_else(|| id.as_i64()))
+                .or_else(|| r.get("trackId").and_then(|id| id.as_i64()));
+
+            if let Some(track_id) = track_id {
                 let fmt = self.query_amp_api(track_id, token, &self.storefront)
                     .or_else(|| {
                         if self.storefront != "us" {
@@ -300,21 +396,21 @@ impl CatalogResolver {
                         }
                     });
 
-                if let Some((cand_fmt, cand_amp_art)) = fmt {
-                    let art_choice = cand_amp_art.or(cand_itunes_art);
+                if let Some((cand_fmt, cand_amp_art, is_lossless)) = fmt {
+                    let art_choice = cand_amp_art.or(cand_art);
                     match best {
-                        Some((best_score, cur_fmt, _)) => {
+                        Some((best_score, cur_fmt, _, _)) => {
                             if score > best_score || (score == best_score && cand_fmt.sample_rate > cur_fmt.sample_rate) {
-                                best = Some((score, cand_fmt, art_choice));
+                                best = Some((score, cand_fmt, art_choice, is_lossless));
                             }
                         }
                         None => {
-                            best = Some((score, cand_fmt, art_choice));
+                            best = Some((score, cand_fmt, art_choice, is_lossless));
                         }
                     }
 
                     // Early exit if strong exact match (exact album and duration matched)
-                    if let Some((best_score, _, _)) = best {
+                    if let Some((best_score, _, _, _)) = best {
                         if best_score >= 350 {
                             break;
                         }
@@ -323,10 +419,10 @@ impl CatalogResolver {
             }
         }
 
-        best.map(|(_, fmt, art)| (fmt, art))
+        best.map(|(_, fmt, art, is_lossless)| (fmt, art, is_lossless))
     }
 
-    fn query_amp_api(&self, track_id: i64, token: &str, storefront: &str) -> Option<(AudioFormat, Option<String>)> {
+    fn query_amp_api(&self, track_id: i64, token: &str, storefront: &str) -> Option<(AudioFormat, Option<String>, bool)> {
         let url = format!(
             "https://amp-api.music.apple.com/v1/catalog/{}/songs/{}?extend=extendedAssetUrls,audioTraits",
             storefront, track_id
@@ -363,19 +459,21 @@ impl CatalogResolver {
             .map(|arr| arr.iter().any(|v| v.as_str() == Some("lossless")))
             .unwrap_or(false);
 
+        let is_lossless = parsed_fmt.is_some() || is_hires_trait || is_lossless_trait;
+
         let final_fmt = match parsed_fmt {
             Some(mut fmt) => {
                 // If Apple traits designate hi-res-lossless, but public web HLS manifest was capped at <= 48 kHz,
-                // native Apple Music desktop streams at least 96 kHz / 24-bit.
+                // native Apple Music desktop streams at up to 192 kHz / 24-bit.
                 if is_hires_trait && fmt.sample_rate <= 48000 {
-                    fmt.sample_rate = 96000;
+                    fmt.sample_rate = 192000;
                     fmt.bit_depth = 24;
                 }
                 fmt
             }
             None => {
                 if is_hires_trait {
-                    AudioFormat::new(96000, 24)
+                    AudioFormat::new(192000, 24)
                 } else if is_lossless_trait {
                     AudioFormat::new(44100, 16)
                 } else {
@@ -384,7 +482,7 @@ impl CatalogResolver {
             }
         };
 
-        Some((final_fmt, artwork_url))
+        Some((final_fmt, artwork_url, is_lossless))
     }
 
     fn parse_hls_for_max_alac(&self, hls_url: &str) -> Option<AudioFormat> {
@@ -511,6 +609,20 @@ fn is_artist_match(target_artist: &str, cand_artist: &str) -> bool {
     !t_first.is_empty() && (t_first == c_first || t.contains(c_first) || c.contains(t_first))
 }
 
+fn get_cand_str<'a>(cand: &'a serde_json::Value, attr_key: &str, itunes_key: &str) -> Option<&'a str> {
+    cand.get("attributes")
+        .and_then(|a| a.get(attr_key))
+        .and_then(|v| v.as_str())
+        .or_else(|| cand.get(itunes_key).and_then(|v| v.as_str()))
+}
+
+fn get_cand_u64(cand: &serde_json::Value, attr_key: &str, itunes_key: &str) -> Option<u64> {
+    cand.get("attributes")
+        .and_then(|a| a.get(attr_key))
+        .and_then(|v| v.as_u64())
+        .or_else(|| cand.get(itunes_key).and_then(|v| v.as_u64()))
+}
+
 fn score_candidate(
     cand: &serde_json::Value,
     target_artist: &str,
@@ -518,12 +630,12 @@ fn score_candidate(
     target_album: Option<&str>,
     target_duration: Option<u64>,
 ) -> Option<i32> {
-    let cand_title = cand.get("trackName").and_then(|v| v.as_str())?;
+    let cand_title = get_cand_str(cand, "name", "trackName")?;
     if !is_title_match(target_title, cand_title) {
         return None;
     }
 
-    let cand_artist = cand.get("artistName").and_then(|v| v.as_str()).unwrap_or("");
+    let cand_artist = get_cand_str(cand, "artistName", "artistName").unwrap_or("");
     if !target_artist.is_empty() && !cand_artist.is_empty() && !is_artist_match(target_artist, cand_artist) {
         return None;
     }
@@ -546,7 +658,7 @@ fn score_candidate(
 
     // Album matching precision
     if let Some(target_alb) = target_album.filter(|a| !a.trim().is_empty()) {
-        let cand_album = cand.get("collectionName").and_then(|v| v.as_str()).unwrap_or("");
+        let cand_album = get_cand_str(cand, "albumName", "collectionName").unwrap_or("");
         let cand_alb_norm = normalize_str(cand_album);
         let target_alb_norm = normalize_str(target_alb);
 
@@ -580,7 +692,7 @@ fn score_candidate(
 
     // Duration matching tolerance
     if let Some(dur_secs) = target_duration {
-        if let Some(cand_ms) = cand.get("trackTimeMillis").and_then(|v| v.as_u64()) {
+        if let Some(cand_ms) = get_cand_u64(cand, "durationInMillis", "trackTimeMillis") {
             let cand_secs = cand_ms / 1000;
             let diff = (cand_secs as i64 - dur_secs as i64).abs();
             if diff <= 1 {

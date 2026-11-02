@@ -144,12 +144,21 @@ impl WasapiManager {
                 depths.push(d);
             }
         }
-        [192000u32, 176400, 96000, 88200, 48000, 44100]
+        let all: Vec<AudioFormat> = [192000u32, 176400, 96000, 88200, 48000, 44100]
             .into_iter()
             .filter(|&r| r <= target.sample_rate)
             .flat_map(|r| depths.clone().into_iter().map(move |d| AudioFormat::new(r, d)))
+            .collect();
+        let supported: Vec<AudioFormat> = all
+            .iter()
+            .copied()
             .filter(|c| self.is_format_supported(endpoint_id, c))
-            .collect()
+            .collect();
+        if supported.is_empty() {
+            all
+        } else {
+            supported
+        }
     }
 
 }

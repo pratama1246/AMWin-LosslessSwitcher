@@ -1,8 +1,8 @@
-; Inno Setup Script for LosslessSwitcher for Apple Music (Win)
-#define MyAppName "LosslessSwitcher for Apple Music"
-#define MyAppShortName "LosslessSwitcher-AM"
-#define MyAppVersion "0.1.0"
-#define MyAppPublisher "LosslessSwitcher Community"
+; Inno Setup Script for LosslessSwitcher For Apple Music (Win)
+#define MyAppName "LosslessSwitcher For Apple Music"
+#define MyAppShortName "AMWin-LosslessSwitcher"
+#define MyAppVersion "0.2.0"
+#define MyAppPublisher "Pratama Putra"
 #define MyAppURL "https://github.com/pratama1246/AMWin-LosslessSwitcher"
 #define MyAppExeName "lossless-switcher-am.exe"
 
@@ -19,7 +19,7 @@ DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 LicenseFile=..\LICENSE
 OutputDir=..\dist
-OutputBaseFilename=LosslessSwitcher-AM-Setup-v{#MyAppVersion}
+OutputBaseFilename=AMWin-LosslessSwitcher-Setup-v{#MyAppVersion}
 SetupIconFile=..\assets\app.ico
 Compression=lzma2/ultra64
 SolidCompression=yes

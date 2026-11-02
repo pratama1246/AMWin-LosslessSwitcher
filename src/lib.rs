@@ -1,3 +1,6 @@
+//! LosslessSwitcher for Apple Music
+//! Developed by Pratama Putra (https://github.com/pratama1246/AMWin-LosslessSwitcher)
+
 pub mod audio;
 pub mod apple_music;
 pub mod coordinator;

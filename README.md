@@ -1,6 +1,6 @@
 <div align="center">
-  <img src="assets/logo.svg" width="130" height="130" alt="LosslessSwitcher-AM Logo" />
-  <h1>LosslessSwitcher-AM</h1>
+  <img src="assets/logo.svg" width="130" height="130" alt="LosslessSwitcher For Apple Music Logo" />
+  <h1>LosslessSwitcher For Apple Music</h1>
   <p><b>Apple Music Audio Format Synchronizer for Windows</b></p>
   <p>Automatically adjusts the Windows audio output format to match the track format reported by Apple Music metadata.</p>
 
@@ -24,8 +24,8 @@ Apple Music for Windows does not provide an option to automatically change the W
 The application changes the Windows endpoint format; it does not decode, capture, or modify Apple Music audio.
 
 <div align="center">
-  <img width="320" alt="LosslessSwitcher-AM main window" src="https://github.com/user-attachments/assets/8c8e2c54-0a2f-43cc-afd9-5cb99100e0c1" />
-  <img width="320" alt="LosslessSwitcher-AM audio settings" src="https://github.com/user-attachments/assets/88edf31a-f9b1-4f50-b66b-91edb6d01d8a" />
+  <img width="320" alt="LosslessSwitcher For Apple Music main window" src="https://github.com/user-attachments/assets/8c8e2c54-0a2f-43cc-afd9-5cb99100e0c1" />
+  <img width="320" alt="LosslessSwitcher For Apple Music audio settings" src="https://github.com/user-attachments/assets/88edf31a-f9b1-4f50-b66b-91edb6d01d8a" />
 </div>
 
 ## Features
@@ -42,7 +42,7 @@ The application changes the Windows endpoint format; it does not decode, capture
 
 ## How It Works
 
-1. LosslessSwitcher-AM detects the active Apple Music session through Windows SMTC.
+1. AMWin-LosslessSwitcher detects the active Apple Music session through Windows SMTC.
 2. It uses track information to look up matching metadata from Apple Music Web and iTunes.
 3. The resolved sample rate and bit depth are used as the target Windows audio endpoint format.
 4. The application checks whether the selected endpoint supports the requested format before applying the change.
@@ -53,10 +53,10 @@ The format shown by the application is based on matched metadata. It is not a di
 
 ### Option A: Windows installer
 
-Download `LosslessSwitcher-AM-Setup-v0.1.0.exe` from [GitHub Releases](../../releases).
+Download `AMWin-LosslessSwitcher-Setup-v0.2.0.exe` from [GitHub Releases](../../releases).
 
 The installer:
-- Installs the application under `%LOCALAPPDATA%\Programs\LosslessSwitcher-AM`.
+- Installs the application under `%LOCALAPPDATA%\Programs\AMWin-LosslessSwitcher`.
 - Creates Start Menu and Desktop shortcuts.
 - Offers an option to launch the application minimized to the system tray at Windows startup.
 - Registers an uninstaller in Windows Settings.
