@@ -63,7 +63,7 @@ The installer:
 
 ### Option B: Portable executable
 
-Download `lossless-switcher-am.exe` from [GitHub Releases](../../releases) and run it from a folder of your choice.
+Download `AMWin-LosslessSwitcher-Portable-v0.2.0.exe` from [GitHub Releases](../../releases) and run it from a folder of your choice.
 
 To keep settings and catalog cache files beside the executable, use `--portable` or create an empty `portable.dat` file in the same folder.
 
