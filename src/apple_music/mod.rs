@@ -1,4 +1,5 @@
 pub mod catalog;
+pub mod etw_reader;
 pub mod smtc;
 
 pub use catalog::CatalogResolver;

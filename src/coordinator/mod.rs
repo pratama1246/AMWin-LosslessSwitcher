@@ -191,6 +191,8 @@ impl Coordinator {
                 }
             };
 
+            catalog_arc.warm_up_etw();
+
             {
                 let mut st = status_arc.lock().unwrap();
                 st.status_message = format!("Active [{}] - Waiting for Apple Music...", catalog_arc.storefront().to_uppercase());
@@ -335,9 +337,11 @@ impl Coordinator {
 
                         let already_applied_for_this_track = !is_new_track && !mode_changed && !device_changed && match last_applied_fmt {
                             Some(applied) => {
-                                current_dev_fmt.map_or(false, |cur| {
-                                    cur.sample_rate == applied.sample_rate && cur.bit_depth == applied.bit_depth
-                                })
+                                applied.sample_rate == effective_target_fmt.sample_rate
+                                    && applied.bit_depth == effective_target_fmt.bit_depth
+                                    && current_dev_fmt.map_or(false, |cur| {
+                                        cur.sample_rate == applied.sample_rate && cur.bit_depth == applied.bit_depth
+                                    })
                             }
                             None => false,
                         };

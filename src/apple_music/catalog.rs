@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use crate::audio::AudioFormat;
+use crate::apple_music::etw_reader::{EtwLogReader, EtwMediaFormat};
 
 unsafe extern "system" {
     fn GetUserGeoID(geoClass: u32) -> i32;
@@ -41,7 +42,7 @@ pub fn get_system_storefront() -> String {
     "us".to_string()
 }
 
-const CACHE_VERSION: u32 = 3;
+const CACHE_VERSION: u32 = 4;
 
 #[derive(Serialize, Deserialize, Clone)]
 struct CachedTrackFormat {
@@ -51,6 +52,8 @@ struct CachedTrackFormat {
     artwork_url: Option<String>,
     #[serde(default)]
     is_lossless: bool,
+    #[serde(default)]
+    track_id: Option<i64>,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -59,6 +62,8 @@ struct CacheFile {
     entries: HashMap<String, CachedTrackFormat>,
     #[serde(default)]
     dev_token: Option<String>,
+    #[serde(default)]
+    adam_formats: HashMap<i64, EtwMediaFormat>,
 }
 
 #[derive(Clone)]
@@ -66,6 +71,9 @@ struct MemoryCachedFormat {
     format: AudioFormat,
     artwork_url: Option<String>,
     is_lossless: bool,
+    track_id: Option<i64>,
+    etw_verified: bool,
+    created_seq: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -80,6 +88,8 @@ pub struct CatalogResolver {
     cache: Mutex<HashMap<String, MemoryCachedFormat>>,
     token: Mutex<String>,
     storefront: String,
+    etw_reader: EtwLogReader,
+    last_artwork: Mutex<Option<(String, Vec<u8>)>>,
 }
 
 impl CatalogResolver {
@@ -93,17 +103,22 @@ impl CatalogResolver {
 
         let mut initial_cache = HashMap::new();
         let mut initial_token = String::new();
+        let mut initial_adam_map = HashMap::new();
         if let Ok(data) = fs::read_to_string(&cache_path) {
             if let Ok(file) = serde_json::from_str::<CacheFile>(&data) {
                 if let Some(tok) = file.dev_token {
                     initial_token = tok;
                 }
                 if file.version == CACHE_VERSION {
+                    initial_adam_map = file.adam_formats;
                     for (k, v) in file.entries {
                         initial_cache.insert(k, MemoryCachedFormat {
                             format: AudioFormat::new(v.sample_rate, v.bit_depth),
                             artwork_url: v.artwork_url,
                             is_lossless: v.is_lossless,
+                            track_id: v.track_id,
+                            etw_verified: true,
+                            created_seq: 0,
                         });
                     }
                 } else {
@@ -121,12 +136,25 @@ impl CatalogResolver {
             cache: Mutex::new(initial_cache),
             token: Mutex::new(initial_token),
             storefront,
+            etw_reader: EtwLogReader::new(initial_adam_map),
+            last_artwork: Mutex::new(None),
+        }
+    }
+
+    pub fn warm_up_etw(&self) {
+        let _ = self.etw_reader.current_event_seq();
+        if let Ok(cache) = self.cache.lock() {
+            self.save_cache(&cache);
         }
     }
 
     pub fn clear_cache(&self) {
         if let Ok(mut cache) = self.cache.lock() {
             cache.clear();
+        }
+        self.etw_reader.clear();
+        if let Ok(mut art) = self.last_artwork.lock() {
+            *art = None;
         }
         let _ = fs::remove_file(&self.cache_path);
         let legacy_artworks = self.cache_path.parent().map(|p| p.join("artworks"));
@@ -157,42 +185,104 @@ impl CatalogResolver {
         };
         let fallback_key = format!("{}|{}", clean_art.to_lowercase(), clean_tit.to_lowercase());
 
-        let (format, art_url, is_lossless) = {
+        let (mut format, art_url, is_lossless, matched_key, entry_info) = {
             let mut found = None;
             if let Ok(cache) = self.cache.lock() {
                 if let Some(entry) = cache.get(&cache_key) {
-                    found = Some((entry.format, entry.artwork_url.clone(), entry.is_lossless));
+                    found = Some((
+                        entry.format,
+                        entry.artwork_url.clone(),
+                        entry.is_lossless,
+                        cache_key.clone(),
+                        (entry.track_id, entry.etw_verified, entry.created_seq),
+                    ));
                 } else if cache_key != fallback_key {
                     if let Some(entry) = cache.get(&fallback_key) {
-                        found = Some((entry.format, entry.artwork_url.clone(), entry.is_lossless));
+                        found = Some((
+                            entry.format,
+                            entry.artwork_url.clone(),
+                            entry.is_lossless,
+                            fallback_key.clone(),
+                            (entry.track_id, entry.etw_verified, entry.created_seq),
+                        ));
                     }
                 }
             }
 
             match found {
-                Some((fmt, art, lossless)) if art.is_some() || !lossless => (fmt, art, lossless),
+                Some((fmt, art, lossless, key, info)) if art.is_some() || !lossless => {
+                    (fmt, art, lossless, Some(key), Some(info))
+                }
                 _ => {
+                    let cur_seq = self.etw_reader.current_event_seq();
                     let album_arg = if clean_alb.is_empty() { None } else { Some(clean_alb.as_str()) };
                     let fetched = self.fetch_catalog_format(&clean_art, &clean_tit, album_arg, duration_secs);
 
-                    if let Some(resolved) = fetched {
+                    if let Some((res_fmt, res_art, res_lossless, res_tid, res_verified)) = fetched {
                         if let Ok(mut cache) = self.cache.lock() {
                             cache.insert(cache_key.clone(), MemoryCachedFormat {
-                                format: resolved.0,
-                                artwork_url: resolved.1.clone(),
-                                is_lossless: resolved.2,
+                                format: res_fmt,
+                                artwork_url: res_art.clone(),
+                                is_lossless: res_lossless,
+                                track_id: res_tid,
+                                etw_verified: res_verified,
+                                created_seq: cur_seq,
                             });
                             self.save_cache(&cache);
                         }
-                        resolved
+                        (
+                            res_fmt,
+                            res_art,
+                            res_lossless,
+                            Some(cache_key.clone()),
+                            Some((res_tid, res_verified, cur_seq)),
+                        )
+                    } else if let Some((fmt, art, lossless, key, info)) = found {
+                        (fmt, art, lossless, Some(key), Some(info))
                     } else {
-                        // Keep previously cached entry if present, otherwise default to 44.1/16 lossy
                         // Do not persist failed lookups into catalog_cache.json
-                        found.unwrap_or((AudioFormat::new(44100, 16), None, false))
+                        (AudioFormat::new(44100, 16), None, false, None, None)
                     }
                 }
             }
         };
+
+        // Live ETW verification & refinement for cached entries
+        if is_lossless {
+            if let (Some(key), Some((track_id, etw_verified, created_seq))) = (matched_key, entry_info) {
+                let mut verified_update: Option<EtwMediaFormat> = None;
+
+                if let Some(tid) = track_id {
+                    if let Some(ef) = self.etw_reader.get_lossless_format_for_adam_id(tid) {
+                        if !etw_verified || ef.sample_rate != format.sample_rate {
+                            verified_update = Some(ef);
+                        }
+                    }
+                }
+
+                if verified_update.is_none() && !etw_verified {
+                    if let Some((_, ef)) = self.etw_reader.get_latest_lossless_since(created_seq) {
+                        verified_update = Some(ef);
+                    }
+                }
+
+                if let Some(ef) = verified_update {
+                    let new_bits = if ef.has_explicit_bit_depth || ef.sample_rate > 48000 {
+                        ef.bit_depth
+                    } else {
+                        format.bit_depth
+                    };
+                    format = AudioFormat::new(ef.sample_rate, new_bits);
+                    if let Ok(mut cache) = self.cache.lock() {
+                        if let Some(entry) = cache.get_mut(&key) {
+                            entry.format = format;
+                            entry.etw_verified = true;
+                        }
+                        self.save_cache(&cache);
+                    }
+                }
+            }
+        }
 
         let artwork_bytes = art_url.and_then(|url| self.fetch_artwork_bytes(&url));
 
@@ -203,13 +293,20 @@ impl CatalogResolver {
         }
     }
 
-
     #[allow(dead_code)]
     pub fn resolve_format(&self, artist: &str, title: &str) -> AudioFormat {
         self.resolve_track(artist, title, None, None).format
     }
 
     fn fetch_artwork_bytes(&self, url: &str) -> Option<Vec<u8>> {
+        if let Ok(guard) = self.last_artwork.lock() {
+            if let Some((ref cached_url, ref cached_bytes)) = *guard {
+                if cached_url == url {
+                    return Some(cached_bytes.clone());
+                }
+            }
+        }
+
         use std::io::Read;
         let resp = ureq::get(url)
             .timeout(std::time::Duration::from_secs(4))
@@ -218,6 +315,9 @@ impl CatalogResolver {
         let mut reader = resp.into_reader().take(10 * 1024 * 1024);
         let mut bytes = Vec::new();
         if reader.read_to_end(&mut bytes).is_ok() && !bytes.is_empty() {
+            if let Ok(mut guard) = self.last_artwork.lock() {
+                *guard = Some((url.to_string(), bytes.clone()));
+            }
             Some(bytes)
         } else {
             None
@@ -225,14 +325,22 @@ impl CatalogResolver {
     }
 
     fn save_cache(&self, cache: &HashMap<String, MemoryCachedFormat>) {
-        let entries: HashMap<String, CachedTrackFormat> = cache.iter().map(|(k, v)| {
-            (k.clone(), CachedTrackFormat {
-                sample_rate: v.format.sample_rate,
-                bit_depth: v.format.bit_depth,
-                artwork_url: v.artwork_url.clone(),
-                is_lossless: v.is_lossless,
+        let entries: HashMap<String, CachedTrackFormat> = cache
+            .iter()
+            .filter(|(_, v)| v.etw_verified)
+            .map(|(k, v)| {
+                (
+                    k.clone(),
+                    CachedTrackFormat {
+                        sample_rate: v.format.sample_rate,
+                        bit_depth: v.format.bit_depth,
+                        artwork_url: v.artwork_url.clone(),
+                        is_lossless: v.is_lossless,
+                        track_id: v.track_id,
+                    },
+                )
             })
-        }).collect();
+            .collect();
 
         let dev_token = self.token.lock().ok().and_then(|t| {
             if t.trim().is_empty() {
@@ -242,10 +350,13 @@ impl CatalogResolver {
             }
         });
 
+        let adam_formats = self.etw_reader.export_adam_map();
+
         let file = CacheFile {
             version: CACHE_VERSION,
             entries,
             dev_token,
+            adam_formats,
         };
 
         if let Ok(json) = serde_json::to_string_pretty(&file) {
@@ -300,7 +411,7 @@ impl CatalogResolver {
         title: &str,
         album: Option<&str>,
         duration_secs: Option<u64>,
-    ) -> Option<(AudioFormat, Option<String>, bool)> {
+    ) -> Option<(AudioFormat, Option<String>, bool, Option<i64>, bool)> {
         let mut token = self.token.lock().ok()?.clone();
 
         // 0. If token is not yet in cache, fetch it dynamically from Apple Music Web
@@ -344,7 +455,7 @@ impl CatalogResolver {
         album: Option<&str>,
         duration_secs: Option<u64>,
         token: &str,
-    ) -> Option<(AudioFormat, Option<String>, bool)> {
+    ) -> Option<(AudioFormat, Option<String>, bool, Option<i64>, bool)> {
         // Step 1: If album is specified, search AMP API with artist + title + album for maximum precision
         if let Some(alb) = album {
             let q_album = format!("{} {} {}", artist, title, alb);
@@ -414,20 +525,32 @@ impl CatalogResolver {
         album: Option<&str>,
         duration_secs: Option<u64>,
         token: &str,
-    ) -> Option<(AudioFormat, Option<String>, bool)> {
+    ) -> Option<(AudioFormat, Option<String>, bool, Option<i64>, bool)> {
+        let latest_etw_adam = self.etw_reader.latest_active_adam_id();
         let mut scored_candidates = Vec::new();
         for r in results {
-            if let Some(score) = score_candidate(r, artist, title, album, duration_secs) {
-                scored_candidates.push((score, r));
+            if let Some(mut score) = score_candidate(r, artist, title, album, duration_secs) {
+                let track_id = r.get("id")
+                    .and_then(|id| id.as_str().and_then(|s| s.parse::<i64>().ok()).or_else(|| id.as_i64()))
+                    .or_else(|| r.get("trackId").and_then(|id| id.as_i64()));
+
+                if let Some(tid) = track_id {
+                    if Some(tid) == latest_etw_adam {
+                        score += 500;
+                    } else if self.etw_reader.get_lossless_format_for_adam_id(tid).is_some() {
+                        score += 75;
+                    }
+                }
+                scored_candidates.push((score, track_id, r));
             }
         }
 
         // Sort descending by score (highest match score first)
         scored_candidates.sort_by(|a, b| b.0.cmp(&a.0));
 
-        let mut best: Option<(i32, AudioFormat, Option<String>, bool)> = None;
+        let mut best: Option<(i32, AudioFormat, Option<String>, bool, Option<i64>, bool)> = None;
 
-        for (score, r) in scored_candidates {
+        for (score, track_id, r) in scored_candidates {
             let cand_art = r.get("attributes")
                 .and_then(|a| a.get("artwork"))
                 .and_then(|a| a.get("url"))
@@ -439,10 +562,6 @@ impl CatalogResolver {
                         .map(|s| s.replace("100x100", "600x600"))
                 });
 
-            let track_id = r.get("id")
-                .and_then(|id| id.as_str().and_then(|s| s.parse::<i64>().ok()).or_else(|| id.as_i64()))
-                .or_else(|| r.get("trackId").and_then(|id| id.as_i64()));
-
             if let Some(track_id) = track_id {
                 let fmt = self.query_amp_api(track_id, token, &self.storefront)
                     .or_else(|| {
@@ -453,21 +572,21 @@ impl CatalogResolver {
                         }
                     });
 
-                if let Some((cand_fmt, cand_amp_art, is_lossless)) = fmt {
+                if let Some((cand_fmt, cand_amp_art, is_lossless, etw_verified)) = fmt {
                     let art_choice = cand_amp_art.or(cand_art);
                     match best {
-                        Some((best_score, cur_fmt, _, _)) => {
+                        Some((best_score, cur_fmt, _, _, _, _)) => {
                             if score > best_score || (score == best_score && cand_fmt.sample_rate > cur_fmt.sample_rate) {
-                                best = Some((score, cand_fmt, art_choice, is_lossless));
+                                best = Some((score, cand_fmt, art_choice, is_lossless, Some(track_id), etw_verified));
                             }
                         }
                         None => {
-                            best = Some((score, cand_fmt, art_choice, is_lossless));
+                            best = Some((score, cand_fmt, art_choice, is_lossless, Some(track_id), etw_verified));
                         }
                     }
 
-                    // Early exit if strong exact match (exact album and duration matched)
-                    if let Some((best_score, _, _, _)) = best {
+                    // Early exit if strong exact match (exact album and duration matched, or ETW active adamID matched)
+                    if let Some((best_score, _, _, _, _, _)) = best {
                         if best_score >= 350 {
                             break;
                         }
@@ -476,10 +595,10 @@ impl CatalogResolver {
             }
         }
 
-        best.map(|(_, fmt, art, is_lossless)| (fmt, art, is_lossless))
+        best.map(|(_, fmt, art, is_lossless, track_id, etw_verified)| (fmt, art, is_lossless, track_id, etw_verified))
     }
 
-    fn query_amp_api(&self, track_id: i64, token: &str, storefront: &str) -> Option<(AudioFormat, Option<String>, bool)> {
+    fn query_amp_api(&self, track_id: i64, token: &str, storefront: &str) -> Option<(AudioFormat, Option<String>, bool, bool)> {
         let url = format!(
             "https://amp-api.music.apple.com/v1/catalog/{}/songs/{}?extend=extendedAssetUrls,audioTraits",
             storefront, track_id
@@ -516,31 +635,54 @@ impl CatalogResolver {
             .map(|arr| arr.iter().any(|v| v.as_str() == Some("lossless")))
             .unwrap_or(false);
 
-        let is_lossless = parsed_fmt.is_some() || is_hires_trait || is_lossless_trait;
+        let mut is_lossless = parsed_fmt.is_some() || is_hires_trait || is_lossless_trait;
+
+        // Check native AMPLibraryAgent ETW telemetry for exact decoded sample rate & bit depth
+        let mut etw_fmt = self.etw_reader.get_lossless_format_for_adam_id(track_id);
+        let is_ambiguous_hires = is_hires_trait && parsed_fmt.map_or(true, |f| f.sample_rate <= 48000);
+
+        if is_ambiguous_hires && etw_fmt.is_none() && self.etw_reader.is_active_log_recent() {
+            for _ in 0..3 {
+                std::thread::sleep(std::time::Duration::from_millis(220));
+                etw_fmt = self.etw_reader.get_lossless_format_for_adam_id(track_id);
+                if etw_fmt.is_some() {
+                    break;
+                }
+            }
+        }
+
+        if let Some(ef) = etw_fmt {
+            is_lossless = true;
+            let bit_depth = if ef.has_explicit_bit_depth || ef.sample_rate > 48000 {
+                ef.bit_depth
+            } else {
+                parsed_fmt.map(|f| f.bit_depth).unwrap_or(ef.bit_depth)
+            };
+            return Some((
+                AudioFormat::new(ef.sample_rate, bit_depth),
+                artwork_url,
+                is_lossless,
+                true,
+            ));
+        }
+
+        if is_ambiguous_hires {
+            // Public web HLS manifest capped at <= 48 kHz for hi-res-lossless track and no ETW record yet.
+            // Use 96 kHz / 24-bit as initial fallback, marked etw_verified = false so it refines once ETW flushes.
+            return Some((
+                AudioFormat::new(96000, 24),
+                artwork_url,
+                is_lossless,
+                false,
+            ));
+        }
 
         let final_fmt = match parsed_fmt {
-            Some(mut fmt) => {
-                // If Apple traits designate hi-res-lossless, but public web HLS manifest was capped at <= 48 kHz,
-                // native Apple Music desktop streams at 96 kHz / 24-bit.
-                // Higher rates (e.g. 192 kHz from manifests providing explicit audio-alac-stereo-192000-24) are preserved.
-                if is_hires_trait && fmt.sample_rate <= 48000 {
-                    fmt.sample_rate = 96000;
-                    fmt.bit_depth = 24;
-                }
-                fmt
-            }
-            None => {
-                if is_hires_trait {
-                    AudioFormat::new(96000, 24)
-                } else if is_lossless_trait {
-                    AudioFormat::new(44100, 16)
-                } else {
-                    AudioFormat::new(44100, 16)
-                }
-            }
+            Some(fmt) => fmt,
+            None => AudioFormat::new(44100, 16),
         };
 
-        Some((final_fmt, artwork_url, is_lossless))
+        Some((final_fmt, artwork_url, is_lossless, true))
     }
 
     fn parse_hls_for_max_alac(&self, hls_url: &str) -> Option<AudioFormat> {
@@ -796,4 +938,52 @@ fn urlencoding(input: &str) -> String {
         }
     }
     encoded
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_hybrid_etw_and_catalog_resolution() {
+        let resolver = CatalogResolver::new();
+        resolver.clear_cache();
+        resolver.warm_up_etw();
+
+        let coldplay = resolver.resolve_track("Coldplay", "Yellow", Some("Parachutes"), Some(266));
+        println!("Coldplay - Yellow => {} (lossless={})", coldplay.format.display_str(), coldplay.is_lossless);
+        assert_eq!(coldplay.format.sample_rate, 192000);
+        assert_eq!(coldplay.format.bit_depth, 24);
+        assert!(coldplay.is_lossless);
+
+        let riize = resolver.resolve_track("RIIZE", "Behind The Shine", Some("ODYSSEY - The 1st Album"), Some(207));
+        println!("RIIZE - Behind The Shine => {} (lossless={})", riize.format.display_str(), riize.is_lossless);
+        assert_eq!(riize.format.sample_rate, 96000);
+        assert_eq!(riize.format.bit_depth, 24);
+        assert!(riize.is_lossless);
+
+        let eagles = resolver.resolve_track("Eagles", "Hotel California", Some("Hotel California (2013 Remaster)"), Some(391));
+        println!("Eagles - Hotel California => {} (lossless={})", eagles.format.display_str(), eagles.is_lossless);
+        assert_eq!(eagles.format.sample_rate, 192000);
+        assert_eq!(eagles.format.bit_depth, 24);
+        assert!(eagles.is_lossless);
+
+        let therose = resolver.resolve_track("The Rose", "Back To Me", Some("DUAL"), Some(216));
+        println!("The Rose - Back To Me => {} (lossless={})", therose.format.display_str(), therose.is_lossless);
+        assert_eq!(therose.format.sample_rate, 48000);
+        assert_eq!(therose.format.bit_depth, 24);
+        assert!(therose.is_lossless);
+
+        let dxs = resolver.resolve_track("DxS", "Blue", Some("Serenade - EP"), Some(231));
+        println!("DxS - Blue => {} (lossless={})", dxs.format.display_str(), dxs.is_lossless);
+        assert_eq!(dxs.format.sample_rate, 44100);
+        assert_eq!(dxs.format.bit_depth, 16);
+        assert!(dxs.is_lossless);
+
+        let joy = resolver.resolve_track("JOY", "Hello", Some("Hello - Special Album"), Some(218));
+        println!("JOY - Hello => {} (lossless={})", joy.format.display_str(), joy.is_lossless);
+        assert_eq!(joy.format.sample_rate, 44100);
+        assert_eq!(joy.format.bit_depth, 16);
+        assert!(!joy.is_lossless);
+    }
 }
