@@ -64,7 +64,6 @@ const ID_BTN_MINIMIZE: isize = 205;
 const ID_BTN_REFRESH: isize = 206;
 const ID_ARTWORK: isize = 207;
 const ID_BTN_CLEAR_CACHE: isize = 208;
-const ID_BTN_CLEAR_CACHE_ABOUT: isize = 209;
 const ID_CHK_ALWAYS_ON_TOP: isize = 210;
 const ID_CHK_STARTUP: isize = 211;
 const ID_BTN_GITHUB: isize = 212;
@@ -575,7 +574,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                             set_startup_enabled(is_checked);
                         }
                 }
-                ID_BTN_CLEAR_CACHE | ID_BTN_CLEAR_CACHE_ABOUT => {
+                ID_BTN_CLEAR_CACHE => {
                     if let Ok(mut guard) = APP_STATE.lock()
                         && let Some(ref mut state) = *guard {
                             state.coordinator.clear_cache();
@@ -1064,13 +1063,6 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
     );
     SendMessageW(btn_github, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
 
-    let btn_clear_cache_about = create_ctrl(
-        w!("BUTTON"), w!("Clear Cache"),
-        WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(windows::Win32::UI::WindowsAndMessaging::BS_PUSHBUTTON as u32),
-        scale_val(345, scale), scale_val(258, scale), scale_val(105, scale), scale_val(28, scale), parent, Some(ID_BTN_CLEAR_CACHE_ABOUT), hinstance,
-    );
-    SendMessageW(btn_clear_cache_about, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
-
     let tab2_controls = vec![
         label_app_title,
         label_app_version,
@@ -1080,7 +1072,6 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
         label_app_disclaimer,
         label_app_copyright,
         btn_github,
-        btn_clear_cache_about,
     ];
 
     let muted_labels = vec![

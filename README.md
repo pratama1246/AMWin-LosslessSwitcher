@@ -81,7 +81,7 @@ ETW telemetry describes format information reported by Apple's playback componen
 
 ### Option A: Windows installer
 
-Download `AMWin-LosslessSwitcher-Setup-v0.3.0.exe` from [GitHub Releases](../../releases).
+Download `AMWin-LosslessSwitcher-Setup-v0.3.1.exe` from [GitHub Releases](../../releases).
 
 The installer:
 - Installs the application under `%LOCALAPPDATA%\Programs\AMWin-LosslessSwitcher`.
@@ -91,7 +91,7 @@ The installer:
 
 ### Option B: Portable executable
 
-Download `AMWin-LosslessSwitcher-Portable-v0.3.0.exe` from [GitHub Releases](../../releases) and run it from a folder of your choice.
+Download `AMWin-LosslessSwitcher-Portable-v0.3.1.exe` from [GitHub Releases](../../releases) and run it from a folder of your choice.
 
 To store settings and catalog cache files beside the executable, use `--portable` or create an empty `portable.dat` file in the same folder.
 

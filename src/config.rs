@@ -17,7 +17,7 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             mode: SwitcherMode::Seamless,
-            settling_delay_ms: 200,
+            settling_delay_ms: 300,
             is_always_on_top: false,
             selected_device_id: None,
             selected_device_name: None,

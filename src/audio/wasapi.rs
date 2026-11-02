@@ -111,7 +111,13 @@ impl WasapiManager {
                 None,
             );
             windows::Win32::System::Com::CoTaskMemFree(Some(mix_format as *const _));
-            init_res.is_ok()
+            if init_res.is_err() {
+                return false;
+            }
+
+            // Deeper probe: verify that the audio render client service is ready
+            // (ensures APO filters and driver render pins have attached properly)
+            client.GetService::<windows::Win32::Media::Audio::IAudioRenderClient>().is_ok()
         }
     }
 

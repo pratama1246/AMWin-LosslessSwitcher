@@ -1,7 +1,7 @@
 ; Inno Setup Script for LosslessSwitcher For Apple Music (Win)
 #define MyAppName "LosslessSwitcher For Apple Music"
 #define MyAppShortName "AMWin-LosslessSwitcher"
-#define MyAppVersion "0.3.0"
+#define MyAppVersion "0.3.1"
 #define MyAppPublisher "Pratama Putra"
 #define MyAppURL "https://github.com/pratama1246/AMWin-LosslessSwitcher"
 #define MyAppExeName "lossless-switcher-am.exe"

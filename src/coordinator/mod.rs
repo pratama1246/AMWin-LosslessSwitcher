@@ -415,30 +415,6 @@ impl Coordinator {
                                 }
                             }
 
-                            let probe_deadline = Instant::now() + Duration::from_millis(400);
-                            while Instant::now() < probe_deadline {
-                                if wasapi.probe_device_ready(&active_device_id) {
-                                    break;
-                                }
-                                thread::sleep(Duration::from_millis(25));
-                            }
-
-                            // Post-switch settling: give Windows audio engine and DAC PLL extra headroom for clock transitions
-                            let post_delay = if is_high_rate || is_clock_family_change {
-                                150
-                            } else {
-                                80
-                            };
-                            thread::sleep(Duration::from_millis(post_delay));
-
-                            if should_resume {
-                                let resume_session = smtc.get_apple_music_session().or_else(|| apple_session.clone());
-                                if let Some(ref session) = resume_session
-                                    && !smtc.resume_playback_reliable(session) {
-                                        resume_until = Some(Instant::now() + Duration::from_secs(8));
-                                    }
-                            }
-
                             let (applied_fmt, is_clamped) = match switch_res {
                                 Ok(clamped) => {
                                     let clamped_flag = clamped.sample_rate < requested_fmt.sample_rate 
@@ -450,6 +426,45 @@ impl Coordinator {
                                 }
                                 Err(_) => (None, false),
                             };
+
+                            let probe_deadline = Instant::now() + Duration::from_millis(500);
+                            while Instant::now() < probe_deadline {
+                                if wasapi.probe_device_ready(&active_device_id) {
+                                    break;
+                                }
+                                thread::sleep(Duration::from_millis(25));
+                            }
+
+                            // Adaptive post-switch settling: give Windows audio engine, Waves MaxxAudio APO, and DAC PLL
+                            // sufficient headroom for crystal clock stabilization and filter graph reconstruction.
+                            let actual_applied_rate = applied_fmt.map(|f| f.sample_rate).unwrap_or(effective_target_fmt.sample_rate);
+                            let is_cross_clock_family = cur_rate > 0 && (
+                                (cur_rate % 44100 == 0 && actual_applied_rate % 48000 == 0)
+                                || (cur_rate % 48000 == 0 && actual_applied_rate % 44100 == 0)
+                            );
+                            let is_high_final = actual_applied_rate >= 96000 || cur_rate >= 96000;
+                            let had_fallback_or_clamp = is_clamped || !failed_rates.is_empty();
+
+                            let post_delay = if is_cross_clock_family || is_high_final {
+                                if had_fallback_or_clamp {
+                                    320 // Cross-family + driver fallback churn (e.g. Waves MaxxAudio rebuild)
+                                } else {
+                                    280 // Standard cross-family PLL lock time for dual-crystal USB DACs
+                                }
+                            } else if had_fallback_or_clamp {
+                                180 // Same family but had clamp fallback retry
+                            } else {
+                                80  // Intra-family transitions remain lightning fast
+                            };
+                            thread::sleep(Duration::from_millis(post_delay));
+
+                            if should_resume {
+                                let resume_session = smtc.get_apple_music_session().or_else(|| apple_session.clone());
+                                if let Some(ref session) = resume_session
+                                    && !smtc.resume_playback_reliable(session) {
+                                        resume_until = Some(Instant::now() + Duration::from_secs(8));
+                                    }
+                            }
 
                             let new_current_fmt = policy_config.get_device_format(&active_device_id).ok()
                                 .or_else(|| wasapi.get_current_format(&active_device_id).ok());
