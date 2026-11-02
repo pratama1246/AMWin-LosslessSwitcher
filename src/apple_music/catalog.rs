@@ -42,7 +42,7 @@ pub fn get_system_storefront() -> String {
     "us".to_string()
 }
 
-const CACHE_VERSION: u32 = 4;
+const CACHE_VERSION: u32 = 5;
 
 #[derive(Serialize, Deserialize, Clone)]
 struct CachedTrackFormat {
@@ -636,13 +636,18 @@ impl CatalogResolver {
 
         if let Some(ef) = etw_fmt {
             is_lossless = true;
-            let bit_depth = if ef.has_explicit_bit_depth || ef.sample_rate > 48000 {
+            let valid_rate = if !is_hires_trait && ef.sample_rate > 48000 {
+                parsed_fmt.map(|f| f.sample_rate).unwrap_or(44100)
+            } else {
+                ef.sample_rate
+            };
+            let bit_depth = if ef.has_explicit_bit_depth || valid_rate > 48000 {
                 ef.bit_depth
             } else {
                 parsed_fmt.map(|f| f.bit_depth).unwrap_or(ef.bit_depth)
             };
             return Some((
-                AudioFormat::new(ef.sample_rate, bit_depth),
+                AudioFormat::new(valid_rate, bit_depth),
                 artwork_url,
                 is_lossless,
                 true,

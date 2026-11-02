@@ -98,9 +98,16 @@ impl PolicyConfig {
         if candidates.is_empty() {
             candidates.push(*target);
         }
+        let mut failed_rates = Vec::new();
         for c in candidates {
+            if failed_rates.contains(&c.sample_rate) {
+                continue;
+            }
             if self.set_device_format(endpoint_id, &c).is_ok() {
                 return Ok(c);
+            } else {
+                failed_rates.push(c.sample_rate);
+                std::thread::sleep(std::time::Duration::from_millis(30));
             }
         }
         Err(windows::core::Error::from_hresult(windows::core::HRESULT(0x88890008_u32 as i32)))

@@ -326,29 +326,6 @@ fn parse_tracerpt_xml(xml: &str, state: &mut EtwState) {
             }
         }
 
-        if let Some(pos) = msg.find("Doing lease action 1 (start) for adamID ") {
-            let after_prefix = &msg[pos + "Doing lease action 1 (start) for adamID ".len()..];
-            let digits: String = after_prefix.chars().take_while(|c| c.is_ascii_digit()).collect();
-            if let Ok(id) = digits.parse::<i64>()
-                && id > 0 {
-                    current_adam_id = Some(id);
-                    state.latest_active_adam_id = Some(id);
-                }
-            continue;
-        }
-
-        if current_adam_id.is_none()
-            && let Some(pos) = msg.find("Loading asset for ") {
-                let after_prefix = &msg[pos + "Loading asset for ".len()..];
-                let digits: String = after_prefix.chars().take_while(|c| c.is_ascii_digit()).collect();
-                if let Ok(id) = digits.parse::<i64>()
-                    && id > 0 {
-                        current_adam_id = Some(id);
-                        state.latest_active_adam_id = Some(id);
-                    }
-                continue;
-            }
-
         if msg.contains("mediaFormatinfo")
             && let Some(parsed) = parse_media_format_line(msg) {
                 state.event_seq = state.event_seq.wrapping_add(1);
@@ -427,9 +404,9 @@ fn should_replace_format(prev: &EtwMediaFormat, next: &EtwMediaFormat) -> bool {
         return true;
     }
     if !next.has_explicit_bit_depth && prev.has_explicit_bit_depth {
-        return next.sample_rate > prev.sample_rate;
+        return false;
     }
-    next.sample_rate >= prev.sample_rate
+    true
 }
 
 #[cfg(test)]

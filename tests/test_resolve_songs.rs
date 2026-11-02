@@ -54,4 +54,11 @@ fn test_resolve_songs_with_artwork() {
     assert_eq!(res_riize.format.sample_rate, 96000);
     assert_eq!(res_riize.format.bit_depth, 24);
     assert!(res_riize.is_lossless);
+
+    // 7. DxS - Rockstar (DK Solo) from Serenade (Lossless 44.1 kHz / 16-bit, NOT Hi-Res 96k)
+    let res_dxs = catalog.resolve_track("DxS", "Rockstar (DK Solo)", Some("Serenade"), None);
+    println!("Resolved DxS - Rockstar (DK Solo): format={:?}, is_lossless={}", res_dxs.format, res_dxs.is_lossless);
+    assert_eq!(res_dxs.format.sample_rate, 44100);
+    assert_eq!(res_dxs.format.bit_depth, 16);
+    assert!(res_dxs.is_lossless);
 }

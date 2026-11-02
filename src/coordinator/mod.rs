@@ -201,6 +201,8 @@ impl Coordinator {
                 st.mode
             };
             let mut last_active_device_id: Option<String> = None;
+            let mut last_requested_fmt: Option<AudioFormat> = None;
+            let mut device_max_rates: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
 
             loop {
                 if *shutdown_arc.lock().unwrap() {
@@ -242,6 +244,7 @@ impl Coordinator {
                 if device_changed {
                     last_active_device_id = Some(active_device_id.clone());
                     last_applied_fmt = None;
+                    last_requested_fmt = None;
                     resolve_cache = None;
                 }
 
@@ -318,6 +321,9 @@ impl Coordinator {
                             Some((ref d, r, ref list)) if *d == active_device_id && r == requested_fmt => list.clone(),
                             _ => {
                                 let mut list = wasapi.supported_candidates(&active_device_id, &requested_fmt);
+                                if let Some(&max_rate) = device_max_rates.get(&active_device_id) {
+                                    list.retain(|c| c.sample_rate <= max_rate);
+                                }
                                 if list.is_empty() {
                                     list.push(requested_fmt);
                                 }
@@ -329,28 +335,23 @@ impl Coordinator {
 
                         let cur_rate = current_dev_fmt.map(|f| f.sample_rate).unwrap_or(0);
                         let cur_bits = current_dev_fmt.map(|f| f.bit_depth).unwrap_or(0);
+                        let requested_changed = last_requested_fmt != Some(requested_fmt);
 
-                        let already_applied_for_this_track = !is_new_track && !mode_changed && !device_changed && match last_applied_fmt {
-                            Some(applied) => {
-                                applied.sample_rate == effective_target_fmt.sample_rate
-                                    && applied.bit_depth == effective_target_fmt.bit_depth
-                                    && current_dev_fmt.is_some_and(|cur| {
-                                        cur.sample_rate == applied.sample_rate && cur.bit_depth == applied.bit_depth
-                                    })
-                            }
-                            None => false,
-                        };
+                        let already_applied_for_this_track = !is_new_track
+                            && !mode_changed
+                            && !device_changed
+                            && !requested_changed
+                            && last_applied_fmt.is_some_and(|applied| {
+                                current_dev_fmt.is_some_and(|cur| {
+                                    cur.sample_rate == applied.sample_rate && cur.bit_depth == applied.bit_depth
+                                })
+                            });
 
-                        let needs_switch = device_changed || mode_changed || (!already_applied_for_this_track && {
+                        let needs_switch = device_changed || mode_changed || requested_changed || (!already_applied_for_this_track && {
                             cur_rate != effective_target_fmt.sample_rate || cur_bits != effective_target_fmt.bit_depth
                         });
 
-                        let format_differs = match last_applied_fmt {
-                            Some(last) => last.sample_rate != effective_target_fmt.sample_rate || last.bit_depth != effective_target_fmt.bit_depth,
-                            None => true,
-                        };
-
-                        if needs_switch && (is_new_track || mode_changed || device_changed || format_differs) {
+                        if needs_switch {
                             {
                                 let mut st = status_arc.lock().unwrap();
                                 st.is_syncing = true;
@@ -400,10 +401,17 @@ impl Coordinator {
 
                             // Tries each driver-accepted candidate in descending order
                             let mut switch_res = Err(windows::core::Error::from_hresult(windows::core::HRESULT(0x88890008_u32 as i32)));
+                            let mut failed_rates = Vec::new();
                             for c in candidates.iter() {
+                                if failed_rates.contains(&c.sample_rate) {
+                                    continue;
+                                }
                                 if policy_config.set_device_format(&active_device_id, c).is_ok() {
                                     switch_res = Ok(*c);
                                     break;
+                                } else {
+                                    failed_rates.push(c.sample_rate);
+                                    thread::sleep(Duration::from_millis(30));
                                 }
                             }
 
@@ -435,6 +443,9 @@ impl Coordinator {
                                 Ok(clamped) => {
                                     let clamped_flag = clamped.sample_rate < requested_fmt.sample_rate 
                                         || clamped.bit_depth < requested_fmt.bit_depth;
+                                    if clamped_flag {
+                                        device_max_rates.insert(active_device_id.clone(), clamped.sample_rate);
+                                    }
                                     (Some(clamped), clamped_flag)
                                 }
                                 Err(_) => (None, false),
@@ -443,11 +454,17 @@ impl Coordinator {
                             let new_current_fmt = policy_config.get_device_format(&active_device_id).ok()
                                 .or_else(|| wasapi.get_current_format(&active_device_id).ok());
 
-                            if applied_fmt.is_some() {
+                            if let Some(applied) = applied_fmt {
                                 if let Ok(mut key) = last_track_key_arc.lock() {
                                     *key = track_key.clone();
                                 }
                                 last_applied_fmt = applied_fmt;
+                                last_requested_fmt = Some(requested_fmt);
+                                let pruned: Vec<AudioFormat> = candidates
+                                    .into_iter()
+                                    .filter(|c| c.sample_rate <= applied.sample_rate && c.bit_depth <= applied.bit_depth)
+                                    .collect();
+                                resolve_cache = Some((active_device_id.clone(), requested_fmt, pruned));
                             } else {
                                 // Clear cached candidate list so the next poll re-evaluates cleanly
                                 resolve_cache = None;
@@ -478,6 +495,10 @@ impl Coordinator {
                             if let Ok(mut key) = last_track_key_arc.lock() {
                                 *key = track_key.clone();
                             }
+                            if last_applied_fmt.is_none() {
+                                last_applied_fmt = current_dev_fmt;
+                            }
+                            last_requested_fmt = Some(requested_fmt);
                             let mut st = status_arc.lock().unwrap();
                             st.is_syncing = false;
                             st.current_track = Some(track.clone());
@@ -500,6 +521,7 @@ impl Coordinator {
                         }
                     }
                     None => {
+                        last_requested_fmt = None;
                         let mut st = status_arc.lock().unwrap();
                         st.current_track = None;
                         st.target_format = None;

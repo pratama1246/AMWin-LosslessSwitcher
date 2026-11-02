@@ -106,3 +106,63 @@ fn test_switcher_mode_logic() {
     let needs_switch = cur_rate != target.sample_rate || cur_bits != target.bit_depth;
     assert!(!needs_switch, "Seamless mode must NOT trigger DAC reset when rate and container match");
 }
+
+#[test]
+fn test_clamped_mode_loop_prevention() {
+    // Scenario: Track is 192 kHz / 24-bit, but device max hardware limit is 48 kHz / 24-bit.
+    let requested_fmt = AudioFormat::new(192000, 24);
+    let clamped_applied_fmt = AudioFormat::new(48000, 24);
+    let cur_fmt = clamped_applied_fmt;
+
+    let last_applied_fmt: Option<AudioFormat> = Some(clamped_applied_fmt);
+    let mut last_requested_fmt: Option<AudioFormat> = Some(requested_fmt);
+
+    // On tick 2 (same track, same mode, same device, same requested format):
+    let is_new_track = false;
+    let mode_changed = false;
+    let device_changed = false;
+    let requested_changed = last_requested_fmt != Some(requested_fmt);
+
+    let already_applied_for_this_track = !is_new_track
+        && !mode_changed
+        && !device_changed
+        && !requested_changed
+        && last_applied_fmt.is_some_and(|applied| {
+            cur_fmt.sample_rate == applied.sample_rate && cur_fmt.bit_depth == applied.bit_depth
+        });
+
+    assert!(already_applied_for_this_track, "Clamped format already applied must be recognized on subsequent ticks");
+
+    let effective_target_fmt = clamped_applied_fmt;
+    let cur_rate = cur_fmt.sample_rate;
+    let cur_bits = cur_fmt.bit_depth;
+
+    let needs_switch = device_changed || mode_changed || requested_changed || (!already_applied_for_this_track && {
+        cur_rate != effective_target_fmt.sample_rate || cur_bits != effective_target_fmt.bit_depth
+    });
+
+    assert!(!needs_switch, "Clamped track MUST NOT trigger another switch (no infinite repeat loop)");
+
+    // Scenario 2: ETW refinement mid-track from 44.1k to 96k
+    let initial_requested = AudioFormat::new(44100, 24);
+    last_requested_fmt = Some(initial_requested);
+    let last_applied_for_etw = Some(initial_requested);
+
+    let refined_requested = AudioFormat::new(96000, 24);
+    let requested_changed = last_requested_fmt != Some(refined_requested);
+    assert!(requested_changed, "ETW format refinement must be detected as requested_changed");
+
+    let already_applied = !is_new_track
+        && !mode_changed
+        && !device_changed
+        && !requested_changed
+        && last_applied_for_etw.is_some_and(|applied| {
+            cur_fmt.sample_rate == applied.sample_rate && cur_fmt.bit_depth == applied.bit_depth
+        });
+    assert!(!already_applied, "ETW refinement must invalidate already_applied_for_this_track");
+
+    let needs_switch_etw = device_changed || mode_changed || requested_changed || (!already_applied && {
+        cur_rate != refined_requested.sample_rate || cur_bits != refined_requested.bit_depth
+    });
+    assert!(needs_switch_etw, "ETW refinement must trigger format switch to higher resolution");
+}
