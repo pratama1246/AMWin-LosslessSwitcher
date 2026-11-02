@@ -28,6 +28,8 @@ ArchitecturesInstallIn64BitMode=x64compatible
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 UninstallDisplayIcon={app}\{#MyAppExeName}
+CloseApplications=yes
+RestartApplications=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -35,6 +37,17 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 Name: "startupicon"; Description: "Launch automatically on Windows startup (minimized to system tray)"; GroupDescription: "Preferences:"
+
+[InstallDelete]
+Type: filesandordirs; Name: "{userappdata}\LosslessSwitcher-AM"
+Type: filesandordirs; Name: "{userappdata}\AMWin-LosslessSwitcher"
+Type: filesandordirs; Name: "{localappdata}\LosslessSwitcher-AM"
+
+[UninstallDelete]
+Type: filesandordirs; Name: "{userappdata}\LosslessSwitcher-AM"
+Type: filesandordirs; Name: "{userappdata}\AMWin-LosslessSwitcher"
+Type: filesandordirs; Name: "{localappdata}\LosslessSwitcher-AM"
+Type: filesandordirs; Name: "{localappdata}\AMWin-LosslessSwitcher"
 
 [Files]
 Source: "..\target\release\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignoreversion
@@ -50,3 +63,45 @@ Name: "{userstartup}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Parameter
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+function InitializeSetup(): Boolean;
+var
+  ResultCode: Integer;
+begin
+  // Terminate any running instance of the app before installing
+  Exec('taskkill.exe', '/F /IM lossless-switcher-am.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := True;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssInstall then
+  begin
+    // Wipe all old caches and settings during install to ensure zero residual conflict
+    DelTree(ExpandConstant('{userappdata}\LosslessSwitcher-AM'), True, True, True);
+    DelTree(ExpandConstant('{userappdata}\AMWin-LosslessSwitcher'), True, True, True);
+    DelTree(ExpandConstant('{localappdata}\LosslessSwitcher-AM'), True, True, True);
+  end;
+end;
+
+function InitializeUninstall(): Boolean;
+var
+  ResultCode: Integer;
+begin
+  // Terminate any running instance of the app before uninstalling
+  Exec('taskkill.exe', '/F /IM lossless-switcher-am.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := True;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usPostUninstall then
+  begin
+    // Clean up all app data on uninstall
+    DelTree(ExpandConstant('{userappdata}\LosslessSwitcher-AM'), True, True, True);
+    DelTree(ExpandConstant('{userappdata}\AMWin-LosslessSwitcher'), True, True, True);
+    DelTree(ExpandConstant('{localappdata}\LosslessSwitcher-AM'), True, True, True);
+    DelTree(ExpandConstant('{localappdata}\AMWin-LosslessSwitcher'), True, True, True);
+  end;
+end;

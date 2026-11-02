@@ -37,8 +37,8 @@ pub fn get_app_dir() -> PathBuf {
     let app_data = std::env::var("APPDATA").unwrap_or_else(|_| ".".to_string());
     let dir = PathBuf::from(&app_data).join("AMWin-LosslessSwitcher");
     let legacy_dir = PathBuf::from(&app_data).join("LosslessSwitcher-AM");
-    if !dir.exists() && legacy_dir.exists() {
-        let _ = fs::rename(&legacy_dir, &dir);
+    if legacy_dir.exists() {
+        let _ = fs::remove_dir_all(&legacy_dir);
     }
     let _ = fs::create_dir_all(&dir);
     dir
