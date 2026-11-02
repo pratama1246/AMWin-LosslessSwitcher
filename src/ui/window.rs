@@ -2,7 +2,8 @@
 
 use std::sync::{Arc, Mutex};
 use windows::core::{w, PCWSTR};
-use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM, COLORREF, RECT};
+use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM, COLORREF, RECT, GetLastError, ERROR_ALREADY_EXISTS, CloseHandle};
+use windows::Win32::System::Threading::CreateMutexW;
 use windows::Win32::Graphics::Gdi::{
     CreateFontW, DeleteObject, HFONT, FW_NORMAL, FW_BOLD, UpdateWindow, HBITMAP, HBRUSH,
     GetDC, ReleaseDC, CreateCompatibleDC, DeleteDC, CreateCompatibleBitmap,
@@ -27,6 +28,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     PostQuitMessage, RegisterClassExW, SendMessageW, SetTimer, ShowWindow, TranslateMessage,
     CreatePopupMenu, AppendMenuW, TrackPopupMenu, DestroyMenu, SetForegroundWindow, DestroyWindow,
     SetWindowPos, HWND_TOPMOST, HWND_NOTOPMOST, SWP_NOMOVE, SWP_NOSIZE, WS_CLIPCHILDREN,
+    FindWindowW, PostMessageW,
     WM_SIZE, BM_GETCHECK, BS_AUTOCHECKBOX,
     CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, HICON, HMENU, IDC_ARROW, IDI_APPLICATION,
     MSG, SW_HIDE, SW_RESTORE, SW_SHOW, SW_SHOWNORMAL, TPM_BOTTOMALIGN, TPM_LEFTALIGN,
@@ -209,6 +211,25 @@ unsafe fn get_bg_brush() -> HBRUSH {
 
 pub fn run_app() {
     unsafe {
+        // Enforce single instance: prevent multiple instances from running concurrently
+        let mutex_name = w!("Local\\AMWin_LosslessSwitcher_SingleInstance_Mutex");
+        let single_instance_mutex: windows::Win32::Foundation::HANDLE = match CreateMutexW(None, true, mutex_name) {
+            Ok(m) => m,
+            Err(_) => return,
+        };
+        if GetLastError() == ERROR_ALREADY_EXISTS {
+            let class_name = w!("LosslessSwitcherX64Class");
+            if let Ok(existing_hwnd) = FindWindowW(class_name, PCWSTR::null()) {
+                if !existing_hwnd.0.is_null() {
+                    let _ = PostMessageW(existing_hwnd, WM_COMMAND, WPARAM(ID_TRAY_OPEN), LPARAM(0));
+                    let _ = ShowWindow(existing_hwnd, SW_RESTORE);
+                    let _ = SetForegroundWindow(existing_hwnd);
+                }
+            }
+            let _ = CloseHandle(single_instance_mutex);
+            return;
+        }
+
         let _ = windows::Win32::System::Com::CoInitializeEx(
             None,
             windows::Win32::System::Com::COINIT_APARTMENTTHREADED,
@@ -261,7 +282,26 @@ pub fn run_app() {
         let saved_settings = crate::config::load_settings();
         let coordinator = Arc::new(Coordinator::new(saved_settings.mode, saved_settings.settling_delay_ms));
         if let Some(ref dev_id) = saved_settings.selected_device_id {
-            coordinator.set_device_id(Some(dev_id.clone()));
+            let mut resolved_id = Some(dev_id.clone());
+            if let Ok(wasapi) = WasapiManager::new() {
+                if let Ok(devices) = wasapi.list_render_devices() {
+                    let exists = devices.iter().any(|d| &d.id == dev_id);
+                    if !exists {
+                        if let Some(ref dev_name) = saved_settings.selected_device_name {
+                            if let Some(matched) = devices.iter().find(|d| &d.name == dev_name) {
+                                resolved_id = Some(matched.id.clone());
+                            } else {
+                                resolved_id = None;
+                            }
+                        } else {
+                            resolved_id = None;
+                        }
+                    }
+                }
+            }
+            if let Some(ref id) = resolved_id {
+                coordinator.set_device_id(Some(id.clone()));
+            }
         }
         coordinator.start();
         {
@@ -332,6 +372,7 @@ pub fn run_app() {
             }
         }
         windows::Win32::System::Com::CoUninitialize();
+        let _ = CloseHandle(single_instance_mutex);
     }
 }
 
@@ -505,8 +546,10 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                         if let Ok(mut guard) = APP_STATE.lock() {
                             if let Some(ref mut state) = *guard {
                                 let idx = SendMessageW(state.combo_devices, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0 as usize;
-                                if idx < state.cached_devices.len() {
-                                    let dev = &state.cached_devices[idx];
+                                if idx == 0 {
+                                    state.coordinator.set_device_id(None);
+                                } else if idx <= state.cached_devices.len() {
+                                    let dev = &state.cached_devices[idx - 1];
                                     state.coordinator.set_device_id(Some(dev.id.clone()));
                                 }
                             }
@@ -1209,11 +1252,16 @@ unsafe fn save_current_settings() {
     if let Ok(guard) = APP_STATE.lock() {
         if let Some(ref state) = *guard {
             let status = state.coordinator.get_status();
+            let selected_id = state.coordinator.get_device_id();
+            let selected_name = selected_id.as_ref().and_then(|id| {
+                state.cached_devices.iter().find(|d| &d.id == id).map(|d| d.name.clone())
+            });
             let settings = crate::config::AppSettings {
                 mode: status.mode,
                 settling_delay_ms: status.settling_delay_ms,
                 is_always_on_top: state.is_always_on_top,
-                selected_device_id: state.coordinator.get_device_id(),
+                selected_device_id: selected_id,
+                selected_device_name: selected_name,
             };
             crate::config::save_settings(&settings);
         }
@@ -1227,32 +1275,48 @@ unsafe fn refresh_device_list() {
                 if let Some(ref mut state) = *guard {
                     SendMessageW(state.combo_devices, CB_RESETCONTENT, WPARAM(0), LPARAM(0));
 
+                    // Index 0: Auto (Windows Default Device)
+                    let auto_label = "[Auto] Windows Default Device";
+                    let wide_auto: Vec<u16> = auto_label.encode_utf16().chain(std::iter::once(0)).collect();
+                    let pcwstr_auto = PCWSTR::from_raw(wide_auto.as_ptr());
+                    SendMessageW(state.combo_devices, CB_ADDSTRING, WPARAM(0), LPARAM(pcwstr_auto.as_ptr() as isize));
+
                     let saved_dev_id = state.coordinator.get_device_id();
-                    let mut select_idx = 0;
-                    let mut matched_saved = false;
+                    let saved_settings = crate::config::load_settings();
+                    let mut select_idx = 0; // Default to [Auto]
 
                     for (i, dev) in devices.iter().enumerate() {
-                        let wide_name: Vec<u16> = dev.name.encode_utf16().chain(std::iter::once(0)).collect();
+                        let display_name = if dev.is_default {
+                            format!("{} (Default)", dev.name)
+                        } else {
+                            dev.name.clone()
+                        };
+                        let wide_name: Vec<u16> = display_name.encode_utf16().chain(std::iter::once(0)).collect();
                         let pcwstr = PCWSTR::from_raw(wide_name.as_ptr());
                         SendMessageW(state.combo_devices, CB_ADDSTRING, WPARAM(0), LPARAM(pcwstr.as_ptr() as isize));
 
+                        let combo_idx = i + 1;
                         if let Some(ref target_id) = saved_dev_id {
                             if &dev.id == target_id {
-                                select_idx = i;
-                                matched_saved = true;
+                                select_idx = combo_idx;
                             }
-                        }
-
-                        if !matched_saved && (dev.name.to_lowercase().contains("jadeaudio") 
-                            || dev.name.to_lowercase().contains("ja11") 
-                            || dev.is_default) {
-                            select_idx = i;
                         }
                     }
 
-                    if !devices.is_empty() {
-                        SendMessageW(state.combo_devices, CB_SETCURSEL, WPARAM(select_idx), LPARAM(0));
-                        state.coordinator.set_device_id(Some(devices[select_idx].id.clone()));
+                    // Fallback to name matching if GUID changed across USB reconnections
+                    if select_idx == 0 && saved_dev_id.is_some() {
+                        if let Some(ref target_name) = saved_settings.selected_device_name {
+                            if let Some(pos) = devices.iter().position(|d| &d.name == target_name) {
+                                select_idx = pos + 1;
+                            }
+                        }
+                    }
+
+                    SendMessageW(state.combo_devices, CB_SETCURSEL, WPARAM(select_idx), LPARAM(0));
+                    if select_idx == 0 {
+                        state.coordinator.set_device_id(None);
+                    } else {
+                        state.coordinator.set_device_id(Some(devices[select_idx - 1].id.clone()));
                     }
 
                     state.cached_devices = devices;

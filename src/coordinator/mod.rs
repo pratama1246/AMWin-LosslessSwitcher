@@ -202,6 +202,7 @@ impl Coordinator {
                 let st = status_arc.lock().unwrap();
                 st.mode
             };
+            let mut last_active_device_id: Option<String> = None;
 
             loop {
                 if *shutdown_arc.lock().unwrap() {
@@ -219,6 +220,7 @@ impl Coordinator {
                         {
                             let mut st = status_arc.lock().unwrap();
                             st.status_message = "No audio endpoint found".to_string();
+                            st.current_device_format = None;
                         }
                         thread::sleep(Duration::from_millis(1000));
                         continue;
@@ -227,6 +229,23 @@ impl Coordinator {
 
                 let current_dev_fmt = policy_config.get_device_format(&active_device_id).ok()
                     .or_else(|| wasapi.get_current_format(&active_device_id).ok());
+
+                if current_dev_fmt.is_none() {
+                    {
+                        let mut st = status_arc.lock().unwrap();
+                        st.status_message = "Audio endpoint unavailable".to_string();
+                        st.current_device_format = None;
+                    }
+                    thread::sleep(Duration::from_millis(1000));
+                    continue;
+                }
+
+                let device_changed = last_active_device_id.as_deref() != Some(&active_device_id);
+                if device_changed {
+                    last_active_device_id = Some(active_device_id.clone());
+                    last_applied_fmt = None;
+                    resolve_cache = None;
+                }
 
                 // Capture initial format for this device before any modification
                 {
@@ -314,7 +333,7 @@ impl Coordinator {
                         let cur_rate = current_dev_fmt.map(|f| f.sample_rate).unwrap_or(0);
                         let cur_bits = current_dev_fmt.map(|f| f.bit_depth).unwrap_or(0);
 
-                        let already_applied_for_this_track = !is_new_track && !mode_changed && match last_applied_fmt {
+                        let already_applied_for_this_track = !is_new_track && !mode_changed && !device_changed && match last_applied_fmt {
                             Some(applied) => {
                                 current_dev_fmt.map_or(false, |cur| {
                                     cur.sample_rate == applied.sample_rate && cur.bit_depth == applied.bit_depth
@@ -323,7 +342,7 @@ impl Coordinator {
                             None => false,
                         };
 
-                        let needs_switch = mode_changed || (!already_applied_for_this_track && {
+                        let needs_switch = device_changed || mode_changed || (!already_applied_for_this_track && {
                             cur_rate != effective_target_fmt.sample_rate || cur_bits != effective_target_fmt.bit_depth
                         });
 
@@ -332,7 +351,7 @@ impl Coordinator {
                             None => true,
                         };
 
-                        if needs_switch && (is_new_track || mode_changed || format_differs) {
+                        if needs_switch && (is_new_track || mode_changed || device_changed || format_differs) {
                             {
                                 let mut st = status_arc.lock().unwrap();
                                 st.is_syncing = true;

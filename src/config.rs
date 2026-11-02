@@ -9,6 +9,8 @@ pub struct AppSettings {
     pub settling_delay_ms: u64,
     pub is_always_on_top: bool,
     pub selected_device_id: Option<String>,
+    #[serde(default)]
+    pub selected_device_name: Option<String>,
 }
 
 impl Default for AppSettings {
@@ -18,6 +20,7 @@ impl Default for AppSettings {
             settling_delay_ms: 200,
             is_always_on_top: false,
             selected_device_id: None,
+            selected_device_name: None,
         }
     }
 }
