@@ -43,9 +43,7 @@ pub fn get_system_storefront() -> String {
     "us".to_string()
 }
 
-fn default_true() -> bool {
-    true
-}
+const CACHE_VERSION: u32 = 2;
 
 #[derive(Serialize, Deserialize, Clone)]
 struct CachedTrackFormat {
@@ -53,8 +51,14 @@ struct CachedTrackFormat {
     bit_depth: u16,
     #[serde(default)]
     artwork_url: Option<String>,
-    #[serde(default = "default_true")]
+    #[serde(default)]
     is_lossless: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct CacheFile {
+    version: u32,
+    entries: HashMap<String, CachedTrackFormat>,
 }
 
 #[derive(Clone)]
@@ -89,14 +93,23 @@ impl CatalogResolver {
 
         let mut initial_cache = HashMap::new();
         if let Ok(data) = fs::read_to_string(&cache_path) {
-            if let Ok(loaded) = serde_json::from_str::<HashMap<String, CachedTrackFormat>>(&data) {
-                for (k, v) in loaded {
-                    initial_cache.insert(k, MemoryCachedFormat {
-                        format: AudioFormat::new(v.sample_rate, v.bit_depth),
-                        artwork_url: v.artwork_url,
-                        is_lossless: v.is_lossless,
-                    });
+            if let Ok(file) = serde_json::from_str::<CacheFile>(&data) {
+                if file.version == CACHE_VERSION {
+                    for (k, v) in file.entries {
+                        if v.sample_rate != 96000 || !v.is_lossless {
+                            initial_cache.insert(k, MemoryCachedFormat {
+                                format: AudioFormat::new(v.sample_rate, v.bit_depth),
+                                artwork_url: v.artwork_url,
+                                is_lossless: v.is_lossless,
+                            });
+                        }
+                    }
+                } else {
+                    let _ = fs::remove_file(&cache_path);
                 }
+            } else {
+                // Safely discard legacy unversioned flat cache to prevent poisoned entries
+                let _ = fs::remove_file(&cache_path);
             }
         }
 
@@ -107,6 +120,17 @@ impl CatalogResolver {
             cache: Mutex::new(initial_cache),
             token: Mutex::new(DEFAULT_DEV_TOKEN.to_string()),
             storefront,
+        }
+    }
+
+    pub fn clear_cache(&self) {
+        if let Ok(mut cache) = self.cache.lock() {
+            cache.clear();
+        }
+        let _ = fs::remove_file(&self.cache_path);
+        let legacy_artworks = self.cache_path.parent().map(|p| p.join("artworks"));
+        if let Some(p) = legacy_artworks {
+            let _ = fs::remove_dir_all(p);
         }
     }
 
@@ -161,9 +185,9 @@ impl CatalogResolver {
                         }
                         resolved
                     } else {
-                        // Keep previously cached entry if present, otherwise default to 44.1/16 lossless
+                        // Keep previously cached entry if present, otherwise default to 44.1/16 lossy
                         // Do not persist failed lookups into catalog_cache.json
-                        found.unwrap_or((AudioFormat::new(44100, 16), None, true))
+                        found.unwrap_or((AudioFormat::new(44100, 16), None, false))
                     }
                 }
             }
@@ -200,7 +224,7 @@ impl CatalogResolver {
     }
 
     fn save_cache(&self, cache: &HashMap<String, MemoryCachedFormat>) {
-        let to_save: HashMap<String, CachedTrackFormat> = cache.iter().map(|(k, v)| {
+        let entries: HashMap<String, CachedTrackFormat> = cache.iter().map(|(k, v)| {
             (k.clone(), CachedTrackFormat {
                 sample_rate: v.format.sample_rate,
                 bit_depth: v.format.bit_depth,
@@ -209,7 +233,12 @@ impl CatalogResolver {
             })
         }).collect();
 
-        if let Ok(json) = serde_json::to_string_pretty(&to_save) {
+        let file = CacheFile {
+            version: CACHE_VERSION,
+            entries,
+        };
+
+        if let Ok(json) = serde_json::to_string_pretty(&file) {
             let _ = fs::write(&self.cache_path, json);
         }
     }

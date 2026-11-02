@@ -545,12 +545,9 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                     }
                 }
                 ID_BTN_CLEAR_CACHE | ID_BTN_CLEAR_CACHE_ABOUT => {
-                    let dir = crate::config::get_app_dir();
-                    let _ = std::fs::remove_file(dir.join("catalog_cache.json"));
-                    let art_dir = dir.join("artworks");
-                    let _ = std::fs::remove_dir_all(&art_dir);
                     if let Ok(mut guard) = APP_STATE.lock() {
                         if let Some(ref mut state) = *guard {
+                            state.coordinator.clear_cache();
                             state.current_art_hash = None;
                             if let Some(old_hbm) = state.current_hbitmap.take() {
                                 let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(old_hbm.0 as *mut _));
@@ -930,7 +927,7 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
     SendMessageW(radio_seamless, BM_SETCHECK, WPARAM(chk_seamless), LPARAM(0));
 
     let radio_purist = create_ctrl(
-        w!("BUTTON"), w!("Purist (Bit-perfect - strictly matches track bit depth)"),
+        w!("BUTTON"), w!("Purist (Strict - matches track sample rate and bit depth)"),
         WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(windows::Win32::UI::WindowsAndMessaging::BS_AUTORADIOBUTTON as u32),
         scale_val(38, scale), scale_val(150, scale), scale_val(415, scale), scale_val(20, scale), parent, Some(ID_RADIO_PURIST), hinstance,
     );
@@ -1033,7 +1030,7 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
 
     // 3. Desc
     let label_app_desc = create_ctrl(
-        w!("STATIC"), w!("Automatically synchronizes DAC sample rate with Apple Music on Windows for bit-perfect audio playback."),
+        w!("STATIC"), w!("Automatically synchronizes DAC sample rate with Apple Music on Windows to match track metadata."),
         WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX),
         scale_val(40, scale), scale_val(106, scale), scale_val(408, scale), scale_val(32, scale), parent, None, hinstance,
     );
@@ -1616,7 +1613,7 @@ unsafe fn show_tray_context_menu(hwnd: HWND) {
     let _ = AppendMenuW(menu, MF_STRING | seamless_flag, ID_TRAY_SEAMLESS, w!("Seamless Mode (Recommended)"));
 
     let purist_flag = if current_mode == SwitcherMode::Purist { MF_CHECKED } else { MF_UNCHECKED };
-    let _ = AppendMenuW(menu, MF_STRING | purist_flag, ID_TRAY_PURIST, w!("Purist Mode (Bit-Perfect)"));
+    let _ = AppendMenuW(menu, MF_STRING | purist_flag, ID_TRAY_PURIST, w!("Purist Mode (Strict Match)"));
 
     let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
     let _ = AppendMenuW(menu, MF_STRING, ID_TRAY_EXIT, w!("Exit"));

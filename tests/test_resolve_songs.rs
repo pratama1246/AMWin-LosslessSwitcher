@@ -20,4 +20,30 @@ fn test_resolve_songs_with_artwork() {
     println!("Resolved Eagles: format={:?}, artwork_bytes len={:?}", res_eagles.format, res_eagles.artwork_bytes.as_ref().map(|b| b.len()));
     assert_eq!(res_eagles.format.sample_rate, 192000);
     assert_eq!(res_eagles.format.bit_depth, 24);
+
+    // 3. JOY - Hello without album (Lossy AAC track)
+    let res_joy_no_alb = catalog.resolve_track("JOY", "Hello", None, None);
+    println!("Resolved JOY - Hello (NO ALBUM): format={:?}, is_lossless={}", res_joy_no_alb.format, res_joy_no_alb.is_lossless);
+    assert!(!res_joy_no_alb.is_lossless, "JOY - Hello must be detected as Lossy/AAC");
+
+    // 4. Coldplay - Yellow without album (192 kHz / 24-bit Hi-Res)
+    let res_yellow_no_alb = catalog.resolve_track("Coldplay", "Yellow", None, None);
+    println!("Resolved Coldplay - Yellow (NO ALBUM): format={:?}, is_lossless={}", res_yellow_no_alb.format, res_yellow_no_alb.is_lossless);
+    assert_eq!(res_yellow_no_alb.format.sample_rate, 192000);
+    assert_eq!(res_yellow_no_alb.format.bit_depth, 24);
+    assert!(res_yellow_no_alb.is_lossless);
+
+    // 4b. What Apple Music Windows SMTC actually sends:
+    let res_yellow_smtc = catalog.resolve_track("Coldplay - Parachutes", "Yellow", None, None);
+    println!("Resolved 'Coldplay - Parachutes' - 'Yellow': format={:?}, is_lossless={}", res_yellow_smtc.format, res_yellow_smtc.is_lossless);
+    assert_eq!(res_yellow_smtc.format.sample_rate, 192000);
+    assert_eq!(res_yellow_smtc.format.bit_depth, 24);
+    assert!(res_yellow_smtc.is_lossless);
+
+    // 5. The Rose - Back To Me (24/48k)
+    let res_rose = catalog.resolve_track("The Rose", "Back To Me", Some("DUAL"), None);
+    println!("Resolved The Rose - Back To Me: format={:?}, is_lossless={}", res_rose.format, res_rose.is_lossless);
+    assert_eq!(res_rose.format.sample_rate, 48000);
+    assert_eq!(res_rose.format.bit_depth, 24);
+    assert!(res_rose.is_lossless);
 }

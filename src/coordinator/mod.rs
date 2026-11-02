@@ -31,6 +31,8 @@ pub struct Coordinator {
     shutdown_flag: Arc<Mutex<bool>>,
     initial_device_formats: Arc<Mutex<std::collections::HashMap<String, AudioFormat>>>,
     thread_handle: Arc<Mutex<Option<thread::JoinHandle<()>>>>,
+    catalog: Arc<CatalogResolver>,
+    last_processed_track_key: Arc<Mutex<String>>,
 }
 
 impl Coordinator {
@@ -53,6 +55,8 @@ impl Coordinator {
             shutdown_flag: Arc::new(Mutex::new(false)),
             initial_device_formats: Arc::new(Mutex::new(std::collections::HashMap::new())),
             thread_handle: Arc::new(Mutex::new(None)),
+            catalog: Arc::new(CatalogResolver::new()),
+            last_processed_track_key: Arc::new(Mutex::new(String::new())),
         };
 
         coord.capture_initial_formats();
@@ -121,6 +125,13 @@ impl Coordinator {
         }
     }
 
+    pub fn clear_cache(&self) {
+        self.catalog.clear_cache();
+        if let Ok(mut key) = self.last_processed_track_key.lock() {
+            key.clear();
+        }
+    }
+
     pub fn shutdown(&self) {
         {
             let mut flag = self.shutdown_flag.lock().unwrap();
@@ -142,6 +153,8 @@ impl Coordinator {
         let device_id_arc = Arc::clone(&self.selected_device_id);
         let shutdown_arc = Arc::clone(&self.shutdown_flag);
         let initial_fmts_arc = Arc::clone(&self.initial_device_formats);
+        let catalog_arc = Arc::clone(&self.catalog);
+        let last_track_key_arc = Arc::clone(&self.last_processed_track_key);
 
         let handle = thread::spawn(move || {
             let _ = unsafe {
@@ -178,17 +191,13 @@ impl Coordinator {
                 }
             };
 
-            let catalog = CatalogResolver::new();
             {
                 let mut st = status_arc.lock().unwrap();
-                st.status_message = format!("Active [{}] - Waiting for Apple Music...", catalog.storefront().to_uppercase());
+                st.status_message = format!("Active [{}] - Waiting for Apple Music...", catalog_arc.storefront().to_uppercase());
             }
-            let mut last_processed_track_key = String::new();
             let mut last_applied_fmt: Option<AudioFormat> = None;
             let mut resolve_cache: Option<(String, AudioFormat, Vec<AudioFormat>)> = None;
             let mut resume_until: Option<Instant> = None;
-            // ponytail: in-memory only; persist to settings.json if relearning after restart bothers anyone
-            let mut rate_ceiling: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
             let mut last_mode = {
                 let st = status_arc.lock().unwrap();
                 st.mode
@@ -257,7 +266,10 @@ impl Coordinator {
                         } else {
                             format!("{}|{}", track.artist, track.title)
                         };
-                        let is_new_track = track_key != last_processed_track_key;
+                        let is_new_track = {
+                            let last_key = last_track_key_arc.lock().unwrap();
+                            track_key != *last_key
+                        };
 
                         // Instant UI update on track transition: show new title and artwork immediately
                         if is_new_track {
@@ -273,7 +285,7 @@ impl Coordinator {
                         let is_active = apple_session.as_ref().map(|s| smtc.is_active_or_playing(s)).unwrap_or(false);
 
                         let album_opt = if !track.album.is_empty() { Some(track.album.as_str()) } else { None };
-                        let resolution = catalog.resolve_track(&track.artist, &track.title, album_opt, track.duration_secs);
+                        let resolution = catalog_arc.resolve_track(&track.artist, &track.title, album_opt, track.duration_secs);
                         let raw_target_fmt = resolution.format;
                         let artwork_bytes = track.smtc_artwork_bytes.clone().or(resolution.artwork_bytes);
                         let is_lossless = resolution.is_lossless;
@@ -285,10 +297,7 @@ impl Coordinator {
                             SwitcherMode::Purist => raw_target_fmt,
                         };
 
-                        // Passive filter (cached) + per-device ceiling learned from past rejections.
-                        // If cur == resolved (e.g. Realtek already at its learned 48k/24 ceiling) needs_switch is false:
-                        // no pause, no SetDeviceFormat, no failed driver calls.
-                        let ceiling = rate_ceiling.get(&active_device_id).copied().unwrap_or(u32::MAX);
+                        // WASAPI verified candidates sorted descending (highest rate <= requested_fmt first)
                         let candidates: Vec<AudioFormat> = match resolve_cache {
                             Some((ref d, r, ref list)) if *d == active_device_id && r == requested_fmt => list.clone(),
                             _ => {
@@ -300,16 +309,11 @@ impl Coordinator {
                                 list
                             }
                         };
-                        let effective_target_fmt = candidates
-                            .iter()
-                            .find(|c| c.sample_rate <= ceiling)
-                            .copied()
-                            .unwrap_or(requested_fmt);
+                        let effective_target_fmt = candidates.first().copied().unwrap_or(requested_fmt);
 
                         let cur_rate = current_dev_fmt.map(|f| f.sample_rate).unwrap_or(0);
                         let cur_bits = current_dev_fmt.map(|f| f.bit_depth).unwrap_or(0);
 
-                        let is_new_track = track_key != last_processed_track_key;
                         let already_applied_for_this_track = !is_new_track && !mode_changed && match last_applied_fmt {
                             Some(applied) => {
                                 current_dev_fmt.map_or(false, |cur| {
@@ -354,7 +358,6 @@ impl Coordinator {
                                         thread::sleep(Duration::from_millis(15));
                                     }
                                     // Strict barrier: never change the endpoint format under a stream that hasn't paused.
-                                    // ponytail: retries next poll (keys not updated); add backoff if AM stays in Changing
                                     if !smtc.is_paused(session) {
                                         status_arc.lock().unwrap().is_syncing = false;
                                         thread::sleep(Duration::from_millis(400));
@@ -378,18 +381,12 @@ impl Coordinator {
                             };
                             thread::sleep(Duration::from_millis(effective_delay));
 
-                            // Runs after the pause barrier. Tries each driver-accepted candidate in order (a driver may reject
-                            // 16-bit yet accept 24-bit at the same rate); a lower rate than asked teaches the device ceiling.
+                            // Tries each driver-accepted candidate in descending order
                             let mut switch_res = Err(windows::core::Error::from_hresult(windows::core::HRESULT(0x88890008_u32 as i32)));
-                            for c in candidates.iter().filter(|c| c.sample_rate <= ceiling) {
+                            for c in candidates.iter() {
                                 if policy_config.set_device_format(&active_device_id, c).is_ok() {
                                     switch_res = Ok(*c);
                                     break;
-                                }
-                            }
-                            if let Ok(applied) = switch_res {
-                                if applied.sample_rate < effective_target_fmt.sample_rate {
-                                    rate_ceiling.insert(active_device_id.clone(), applied.sample_rate);
                                 }
                             }
 
@@ -431,7 +428,9 @@ impl Coordinator {
                                 .or_else(|| wasapi.get_current_format(&active_device_id).ok());
 
                             if applied_fmt.is_some() {
-                                last_processed_track_key = track_key.clone();
+                                if let Ok(mut key) = last_track_key_arc.lock() {
+                                    *key = track_key.clone();
+                                }
                                 last_applied_fmt = applied_fmt;
                             } else {
                                 // Clear cached candidate list so the next poll re-evaluates cleanly
@@ -460,8 +459,11 @@ impl Coordinator {
                                 }
                             }
                         } else {
-                            last_processed_track_key = track_key.clone();
+                            if let Ok(mut key) = last_track_key_arc.lock() {
+                                *key = track_key.clone();
+                            }
                             let mut st = status_arc.lock().unwrap();
+                            st.is_syncing = false;
                             st.current_track = Some(track.clone());
                             st.target_format = Some(raw_target_fmt);
                             st.artwork_bytes = artwork_bytes;
