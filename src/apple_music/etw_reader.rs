@@ -161,7 +161,7 @@ impl EtwLogReader {
             let size_changed = active_len != st.last_active_len && active_len > 0;
             let throttle_ok = st
                 .last_active_scan
-                .is_none_or(|t| t.elapsed() >= Duration::from_millis(200));
+                .is_none_or(|t| t.elapsed() >= Duration::from_millis(1200));
             (path_changed || size_changed) && throttle_ok
         } else {
             false

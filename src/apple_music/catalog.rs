@@ -253,16 +253,17 @@ impl CatalogResolver {
             && let (Some(key), Some((track_id, etw_verified, created_seq))) = (matched_key, entry_info) {
                 let mut verified_update: Option<EtwMediaFormat> = None;
 
-                if let Some(tid) = track_id
-                    && let Some(ef) = self.etw_reader.get_lossless_format_for_adam_id(tid)
-                        && (!etw_verified || ef.sample_rate != format.sample_rate) {
+                if !etw_verified {
+                    if let Some(tid) = track_id
+                        && let Some(ef) = self.etw_reader.get_lossless_format_for_adam_id(tid) {
                             verified_update = Some(ef);
                         }
 
-                if verified_update.is_none() && !etw_verified
-                    && let Some((_, ef)) = self.etw_reader.get_latest_lossless_since(created_seq) {
-                        verified_update = Some(ef);
-                    }
+                    if verified_update.is_none()
+                        && let Some((_, ef)) = self.etw_reader.get_latest_lossless_since(created_seq) {
+                            verified_update = Some(ef);
+                        }
+                }
 
                 if let Some(ef) = verified_update {
                     let new_bits = if ef.has_explicit_bit_depth || ef.sample_rate > 48000 {
