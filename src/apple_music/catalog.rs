@@ -41,7 +41,7 @@ pub fn get_system_storefront() -> String {
     "us".to_string()
 }
 
-const CACHE_VERSION: u32 = 2;
+const CACHE_VERSION: u32 = 3;
 
 #[derive(Serialize, Deserialize, Clone)]
 struct CachedTrackFormat {
@@ -95,24 +95,21 @@ impl CatalogResolver {
         let mut initial_token = String::new();
         if let Ok(data) = fs::read_to_string(&cache_path) {
             if let Ok(file) = serde_json::from_str::<CacheFile>(&data) {
+                if let Some(tok) = file.dev_token {
+                    initial_token = tok;
+                }
                 if file.version == CACHE_VERSION {
-                    if let Some(tok) = file.dev_token {
-                        initial_token = tok;
-                    }
                     for (k, v) in file.entries {
-                        if v.sample_rate != 96000 || !v.is_lossless {
-                            initial_cache.insert(k, MemoryCachedFormat {
-                                format: AudioFormat::new(v.sample_rate, v.bit_depth),
-                                artwork_url: v.artwork_url,
-                                is_lossless: v.is_lossless,
-                            });
-                        }
+                        initial_cache.insert(k, MemoryCachedFormat {
+                            format: AudioFormat::new(v.sample_rate, v.bit_depth),
+                            artwork_url: v.artwork_url,
+                            is_lossless: v.is_lossless,
+                        });
                     }
                 } else {
                     let _ = fs::remove_file(&cache_path);
                 }
             } else {
-                // Safely discard legacy unversioned flat cache to prevent poisoned entries
                 let _ = fs::remove_file(&cache_path);
             }
         }
@@ -524,16 +521,17 @@ impl CatalogResolver {
         let final_fmt = match parsed_fmt {
             Some(mut fmt) => {
                 // If Apple traits designate hi-res-lossless, but public web HLS manifest was capped at <= 48 kHz,
-                // native Apple Music desktop streams at up to 192 kHz / 24-bit.
+                // native Apple Music desktop streams at 96 kHz / 24-bit.
+                // Higher rates (e.g. 192 kHz from manifests providing explicit audio-alac-stereo-192000-24) are preserved.
                 if is_hires_trait && fmt.sample_rate <= 48000 {
-                    fmt.sample_rate = 192000;
+                    fmt.sample_rate = 96000;
                     fmt.bit_depth = 24;
                 }
                 fmt
             }
             None => {
                 if is_hires_trait {
-                    AudioFormat::new(192000, 24)
+                    AudioFormat::new(96000, 24)
                 } else if is_lossless_trait {
                     AudioFormat::new(44100, 16)
                 } else {

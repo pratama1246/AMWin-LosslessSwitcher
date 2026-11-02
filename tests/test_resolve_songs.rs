@@ -26,17 +26,17 @@ fn test_resolve_songs_with_artwork() {
     println!("Resolved JOY - Hello (NO ALBUM): format={:?}, is_lossless={}", res_joy_no_alb.format, res_joy_no_alb.is_lossless);
     assert!(!res_joy_no_alb.is_lossless, "JOY - Hello must be detected as Lossy/AAC");
 
-    // 4. Coldplay - Yellow without album (192 kHz / 24-bit Hi-Res)
+    // 4. Coldplay - Yellow without album (96 kHz / 24-bit Hi-Res)
     let res_yellow_no_alb = catalog.resolve_track("Coldplay", "Yellow", None, None);
     println!("Resolved Coldplay - Yellow (NO ALBUM): format={:?}, is_lossless={}", res_yellow_no_alb.format, res_yellow_no_alb.is_lossless);
-    assert_eq!(res_yellow_no_alb.format.sample_rate, 192000);
+    assert_eq!(res_yellow_no_alb.format.sample_rate, 96000);
     assert_eq!(res_yellow_no_alb.format.bit_depth, 24);
     assert!(res_yellow_no_alb.is_lossless);
 
     // 4b. What Apple Music Windows SMTC actually sends:
     let res_yellow_smtc = catalog.resolve_track("Coldplay - Parachutes", "Yellow", None, None);
     println!("Resolved 'Coldplay - Parachutes' - 'Yellow': format={:?}, is_lossless={}", res_yellow_smtc.format, res_yellow_smtc.is_lossless);
-    assert_eq!(res_yellow_smtc.format.sample_rate, 192000);
+    assert_eq!(res_yellow_smtc.format.sample_rate, 96000);
     assert_eq!(res_yellow_smtc.format.bit_depth, 24);
     assert!(res_yellow_smtc.is_lossless);
 
@@ -46,4 +46,12 @@ fn test_resolve_songs_with_artwork() {
     assert_eq!(res_rose.format.sample_rate, 48000);
     assert_eq!(res_rose.format.bit_depth, 24);
     assert!(res_rose.is_lossless);
+
+    // 6. RIIZE - Behind The Shine (96 kHz / 24-bit Hi-Res)
+    catalog.clear_cache();
+    let res_riize = catalog.resolve_track("RIIZE", "Behind The Shine", Some("Perfect Crown (Original Soundtrack) Pt. 4 - Single"), None);
+    println!("Resolved RIIZE - Behind The Shine: format={:?}, is_lossless={}", res_riize.format, res_riize.is_lossless);
+    assert_eq!(res_riize.format.sample_rate, 96000);
+    assert_eq!(res_riize.format.bit_depth, 24);
+    assert!(res_riize.is_lossless);
 }
