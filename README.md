@@ -31,6 +31,7 @@ The application changes the Windows endpoint format only. It does not intercept,
 ## Features
 
 - **Hybrid Format Detection** — Combines Apple Music catalog metadata with local ETW playback telemetry to resolve the track's reported format (44.1, 48, 88.2, 96, 176.4, 192 kHz; 16-bit / 24-bit).
+- **Offline & Downloaded Media Support** — Resolves native master formats directly from local Apple Music package manifests (`.movpkg`) when offline or when catalog metadata is ambiguous.
 - **Automatic Endpoint Switching** — Updates the selected Windows audio endpoint when the resolved track format changes to prevent unnecessary OS sample-rate conversion.
 - **Seamless Mode** — Keeps the endpoint at 24-bit while following the track's sample rate (recommended for modern DACs to avoid audio pops).
 - **Purist Mode** — Follows both the sample rate and bit depth reported for the track.
@@ -57,7 +58,9 @@ flowchart TD
     FormatMap --> Correlate
 
     Correlate -->|Telemetry available| Switch[Validate and switch endpoint format]
-    Correlate -->|Telemetry pending| Fallback[Apply catalog-based estimate]
+    Correlate -->|Telemetry pending / Offline| LocalCheck{Check local download .movpkg}
+    LocalCheck -->|Found| Switch
+    LocalCheck -->|Not found| Fallback[Apply catalog-based estimate]
     Fallback -->|Telemetry arrives| Refine[Refine endpoint format]
 ```
 
@@ -81,7 +84,7 @@ ETW telemetry describes format information reported by Apple's playback componen
 
 ### Option A: Windows installer
 
-Download `AMWin-LosslessSwitcher-Setup-v0.3.1.exe` from [GitHub Releases](../../releases).
+Download `AMWin-LosslessSwitcher-Setup-v0.3.2.exe` from [GitHub Releases](../../releases).
 
 The installer:
 - Installs the application under `%LOCALAPPDATA%\Programs\AMWin-LosslessSwitcher`.
@@ -91,7 +94,7 @@ The installer:
 
 ### Option B: Portable executable
 
-Download `AMWin-LosslessSwitcher-Portable-v0.3.1.exe` from [GitHub Releases](../../releases) and run it from a folder of your choice.
+Download `AMWin-LosslessSwitcher-Portable-v0.3.2.exe` from [GitHub Releases](../../releases) and run it from a folder of your choice.
 
 To store settings and catalog cache files beside the executable, use `--portable` or create an empty `portable.dat` file in the same folder.
 
