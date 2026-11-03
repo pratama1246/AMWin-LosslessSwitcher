@@ -22,6 +22,7 @@ struct EtwState {
     last_active_path: Option<PathBuf>,
     last_active_len: u64,
     last_active_scan: Option<Instant>,
+    last_saved_newest: Option<PathBuf>,
     by_adam_id: HashMap<i64, EtwMediaFormat>,
     latest_active_adam_id: Option<i64>,
     latest_active_format: Option<(Option<i64>, EtwMediaFormat, u64)>,
@@ -43,6 +44,7 @@ impl EtwLogReader {
                 last_active_path: None,
                 last_active_len: 0,
                 last_active_scan: None,
+                last_saved_newest: None,
                 by_adam_id: initial_adam_map,
                 latest_active_adam_id: None,
                 latest_active_format: None,
@@ -57,6 +59,7 @@ impl EtwLogReader {
             st.last_active_path = None;
             st.last_active_len = 0;
             st.last_active_scan = None;
+            st.last_saved_newest = None;
             st.by_adam_id.clear();
             st.latest_active_adam_id = None;
             st.latest_active_format = None;
@@ -127,7 +130,7 @@ impl EtwLogReader {
 
         if need_saved {
             let saved_dir = logs_dir.join("SavedLogs");
-            let mut etl_files = recent_etls_in_dir(&saved_dir, 5);
+            let mut etl_files = recent_etls_in_dir(&saved_dir, 30);
             if let Some((active_path, _)) = newest_etl_in_dir(logs_dir) {
                 etl_files.push(active_path);
             }
@@ -137,6 +140,7 @@ impl EtwLogReader {
                     if let Ok(mut st) = self.state.lock() {
                         parse_tracerpt_xml(&xml, &mut st);
                         st.initialized_saved_logs = true;
+                        st.last_saved_newest = newest_etl_in_dir(&saved_dir).map(|(p, _)| p);
                         if let Some((active_path, active_len)) = newest_etl_in_dir(logs_dir) {
                             st.last_active_path = Some(active_path);
                             st.last_active_len = active_len;
@@ -151,6 +155,24 @@ impl EtwLogReader {
             }
         }
 
+        // Apple Music finalizes a session's log into SavedLogs only when it restarts, so a new file there is fresh, complete data.
+        // Only by_adam_id is taken from it; latest_active_* must keep describing the live session.
+        if let Some((newest, _)) = newest_etl_in_dir(&logs_dir.join("SavedLogs")) {
+            let is_new = self.state.lock().is_ok_and(|st| st.last_saved_newest.as_ref() != Some(&newest));
+            if is_new
+                && let Ok(mut st) = self.state.lock()
+            {
+                st.last_saved_newest = Some(newest.clone());
+                drop(st);
+                if let Some(xml) = run_tracerpt(std::slice::from_ref(&newest))
+                    && let Ok(mut st) = self.state.lock()
+                {
+                    let keep = (st.latest_active_adam_id, st.latest_active_format, st.event_seq);
+                    parse_tracerpt_xml(&xml, &mut st);
+                    (st.latest_active_adam_id, st.latest_active_format, st.event_seq) = keep;
+                }
+            }
+        }
         // Check if active ETL file grew or rotated
         let Some((active_path, active_len)) = newest_etl_in_dir(logs_dir) else {
             return;

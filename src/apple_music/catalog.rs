@@ -220,6 +220,12 @@ impl CatalogResolver {
                     let fetched = self.fetch_catalog_format(&clean_art, &clean_tit, album_arg, duration_secs);
 
                     if let Some((res_fmt, res_art, res_lossless, res_tid, res_verified)) = fetched {
+                        // Public HLS caps hi-res at 48 kHz, so unverified online results are guesses; a downloaded copy is exact.
+                        // ponytail: assumes the download matches the streamed quality; only streams with no ETW record and no download stay a guess.
+                        let (res_fmt, res_verified) = match if res_verified { None } else { local_alac_format(&clean_art, &clean_tit) } {
+                            Some(f) => (f, true),
+                            _ => (res_fmt, res_verified),
+                        };
                         if let Ok(mut cache) = self.cache.lock() {
                             cache.insert(cache_key.clone(), MemoryCachedFormat {
                                 format: res_fmt,
@@ -240,6 +246,20 @@ impl CatalogResolver {
                         )
                     } else if let Some((fmt, art, lossless, key, info)) = found {
                         (fmt, art, lossless, Some(key), Some(info))
+                    } else if let Some(fmt) = local_alac_format(&clean_art, &clean_tit) {
+                        // Offline: exact format of the downloaded stream, cached so the disk scan runs once per track.
+                        if let Ok(mut cache) = self.cache.lock() {
+                            cache.insert(cache_key.clone(), MemoryCachedFormat {
+                                format: fmt,
+                                artwork_url: None,
+                                is_lossless: true,
+                                track_id: None,
+                                etw_verified: true,
+                                created_seq: cur_seq,
+                            });
+                            self.save_cache(&cache);
+                        }
+                        (fmt, None, true, Some(cache_key.clone()), Some((None, true, cur_seq)))
                     } else {
                         // Do not persist failed lookups into catalog_cache.json
                         (AudioFormat::new(44100, 16), None, false, None, None)
@@ -933,3 +953,59 @@ fn urlencoding(input: &str) -> String {
     encoded
 }
 
+/// Format of a downloaded (`.movpkg`) ALAC stream, read from the plaintext boot.xml + master playlist.
+/// boot.xml names the stream that finished downloading; the master playlist maps it to `audio-alac-stereo-<rate>-<bits>`.
+fn pkg_format(boot: &str, master: &str) -> Option<AudioFormat> {
+    let tag = boot.split("<Stream ").skip(1).find(|s| s.contains("<Complete>YES"))?
+        .split("UniqueTag=\"").nth(1)?.split('"').next()?;
+    let line = master.lines().find(|l| l.contains(&format!("STABLE-VARIANT-ID=\"{tag}\"")))?;
+    let group = line.split("AUDIO=\"").nth(1)?.split('"').next()?;
+    let mut p = group.strip_prefix("audio-alac-stereo-")?.split('-');
+    Some(AudioFormat::new(p.next()?.parse().ok()?, p.next()?.parse().ok()?))
+}
+
+// ponytail: folder match is artist-substring + exact title (track-number prefix stripped); odd characters Apple sanitizes in filenames just miss and fall back to 16/44.1.
+fn local_alac_format(artist: &str, title: &str) -> Option<AudioFormat> {
+    let root = PathBuf::from(std::env::var_os("USERPROFILE")?).join(r"Music\Apple Music\Media\Apple Music");
+    let (a, t) = (artist.to_lowercase(), title.to_lowercase());
+    let ls = |p: &std::path::Path| fs::read_dir(p).into_iter().flatten().flatten().map(|e| e.path()).collect::<Vec<_>>();
+    for ar in ls(&root) {
+        let n = ar.file_name()?.to_string_lossy().to_lowercase();
+        if n.is_empty() || !(a.contains(&n) || n.contains(&a)) { continue; }
+        for al in ls(&ar) {
+            for pkg in ls(&al) {
+                if pkg.extension().map_or(true, |e| e != "movpkg") { continue; }
+                let stem = pkg.file_stem()?.to_string_lossy().to_lowercase();
+                if stem.split_once(' ').map(|(_, name)| name) != Some(t.as_str()) { continue; }
+                let master = ls(&pkg.join("Data")).into_iter().find(|p| p.to_string_lossy().ends_with("master.m3u8"));
+                if let (Ok(boot), Some(Ok(master))) = (fs::read_to_string(pkg.join("boot.xml")), master.map(fs::read_to_string)) {
+                    if let Some(f) = pkg_format(&boot, &master) { return Some(f); }
+                }
+            }
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod offline_tests {
+    use super::*;
+
+    #[test]
+    fn picks_downloaded_variant_not_best_listed() {
+        let boot = r#"<Streams><Stream ID="x" UniqueTag="aaa"><Complete>YES</Complete></Stream></Streams>"#;
+        let master = "#EXT-X-STREAM-INF:STABLE-VARIANT-ID=\"bbb\",AUDIO=\"audio-alac-stereo-96000-24\"\n\
+                      #EXT-X-STREAM-INF:STABLE-VARIANT-ID=\"aaa\",AUDIO=\"audio-alac-stereo-48000-24\"\n";
+        assert_eq!(pkg_format(boot, master), Some(AudioFormat::new(48000, 24)));
+        assert_eq!(pkg_format(&boot.replace("YES", "NO"), master), None);
+    }
+
+    #[test]
+    fn real_downloads_if_present() {
+        let dir = PathBuf::from(std::env::var_os("USERPROFILE").unwrap()).join(r"Music\Apple Music\Media\Apple Music\Coldplay");
+        if dir.exists() {
+            let f = local_alac_format("Coldplay", "Yellow").expect("downloaded Yellow not resolved");
+            assert_eq!((f.sample_rate, f.bit_depth), (192000, 24));
+        }
+    }
+}
