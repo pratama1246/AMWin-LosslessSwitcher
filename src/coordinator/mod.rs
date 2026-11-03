@@ -347,9 +347,11 @@ impl Coordinator {
                                 })
                             });
 
-                        let needs_switch = device_changed || mode_changed || requested_changed || (!already_applied_for_this_track && {
+                        let is_startup_idle = last_applied_fmt.is_none() && !is_active;
+
+                        let needs_switch = !is_startup_idle && (device_changed || mode_changed || requested_changed || (!already_applied_for_this_track && {
                             cur_rate != effective_target_fmt.sample_rate || cur_bits != effective_target_fmt.bit_depth
-                        });
+                        }));
 
                         if needs_switch {
                             {
@@ -507,13 +509,15 @@ impl Coordinator {
                                 }
                             }
                         } else {
-                            if let Ok(mut key) = last_track_key_arc.lock() {
-                                *key = track_key.clone();
+                            if !is_startup_idle {
+                                if let Ok(mut key) = last_track_key_arc.lock() {
+                                    *key = track_key.clone();
+                                }
+                                if last_applied_fmt.is_none() {
+                                    last_applied_fmt = current_dev_fmt;
+                                }
+                                last_requested_fmt = Some(requested_fmt);
                             }
-                            if last_applied_fmt.is_none() {
-                                last_applied_fmt = current_dev_fmt;
-                            }
-                            last_requested_fmt = Some(requested_fmt);
                             let mut st = status_arc.lock().unwrap();
                             st.is_syncing = false;
                             st.current_track = Some(track.clone());
@@ -521,7 +525,9 @@ impl Coordinator {
                             st.artwork_bytes = artwork_bytes;
                             st.current_device_format = current_dev_fmt;
                             st.is_lossless = is_lossless;
-                            if !needs_switch {
+                            if is_startup_idle {
+                                st.status_message = format!("Waiting for playback: {}", track.title);
+                            } else if !needs_switch {
                                 let disp_fmt = current_dev_fmt.unwrap_or(effective_target_fmt);
                                 let is_cur_clamped = disp_fmt.sample_rate < requested_fmt.sample_rate 
                                     || disp_fmt.bit_depth < requested_fmt.bit_depth;
