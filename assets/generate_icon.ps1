@@ -20,69 +20,38 @@ function New-RoundedRectangle {
     return $path
 }
 
-function Render-LosslessLogo {
+function Render-RateMatchLogo {
     param([int]$size)
     $bmp = New-Object System.Drawing.Bitmap($size, $size, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
     $g = [System.Drawing.Graphics]::FromImage($bmp)
-    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
-    $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-    $g.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
+    $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
     $g.Clear([System.Drawing.Color]::Transparent)
-
-    [float]$scale = [float]$size / 512.0
-
-    # Solid Squircle Container (Flat Dark Charcoal)
-    [float]$margin = 16.0 * $scale
-    [float]$w = 480.0 * $scale
-    [float]$radius = 112.0 * $scale
-    $rect = New-Object System.Drawing.RectangleF($margin, $margin, $w, $w)
-    $squirclePath = New-RoundedRectangle $rect $radius
-
-    $bgBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255, 14, 17, 24))
-    $g.FillPath($bgBrush, $squirclePath)
-
-    # Solid Flat Border
-    [float]$strokeWidth = [Math]::Max(1.0, 4.0 * $scale)
-    $borderPen = New-Object System.Drawing.Pen([System.Drawing.Color]::FromArgb(255, 30, 36, 51), $strokeWidth)
-    $g.DrawPath($borderPen, $squirclePath)
-
-    # Flat Solid Brushes (No gradients, no blur, no shadows)
-    $cyanBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255, 0, 240, 255))
-    $pinkBrush = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255, 255, 45, 85))
-
-    $pills = @(
-        # L bars (Solid Cyan)
-        @{ x = 116.0; y = 130.0; w = 28.0; h = 230.0; brush = $cyanBrush },
-        @{ x = 156.0; y = 170.0; w = 28.0; h = 190.0; brush = $cyanBrush },
-        @{ x = 196.0; y = 270.0; w = 28.0; h = 90.0;  brush = $cyanBrush },
-        @{ x = 236.0; y = 324.0; w = 36.0; h = 36.0;  brush = $cyanBrush },
-        # S bars (Solid Pink)
-        @{ x = 284.0; y = 130.0; w = 100.0; h = 28.0; brush = $pinkBrush },
-        @{ x = 284.0; y = 166.0; w = 28.0;  h = 48.0; brush = $pinkBrush },
-        @{ x = 274.0; y = 238.0; w = 102.0; h = 28.0; brush = $pinkBrush },
-        @{ x = 356.0; y = 274.0; w = 28.0;  h = 52.0; brush = $pinkBrush },
-        @{ x = 260.0; y = 332.0; w = 124.0; h = 28.0; brush = $pinkBrush }
-    )
-
-    foreach ($p in $pills) {
-        [float]$px = [float]$p.x * $scale
-        [float]$py = [float]$p.y * $scale
-        [float]$pw = [float]$p.w * $scale
-        [float]$ph = [float]$p.h * $scale
-        $pRect = New-Object System.Drawing.RectangleF($px, $py, $pw, $ph)
-        [float]$pRad = [Math]::Min($pw, $ph) / 2.0
-        $pPath = New-RoundedRectangle $pRect $pRad
-        $g.FillPath($p.brush, $pPath)
-    }
-
-    # Flat Status Dots (for >= 48px)
-    if ($size -ge 48) {
-        $dotWhite = New-Object System.Drawing.SolidBrush([System.Drawing.Color]::FromArgb(255, 255, 255, 255))
-        $g.FillEllipse($cyanBrush, [float](388.0 * $scale), [float](94.0 * $scale), [float](12.0 * $scale), [float](12.0 * $scale))
-        $g.FillEllipse($dotWhite,  [float](410.0 * $scale), [float](94.0 * $scale), [float](12.0 * $scale), [float](12.0 * $scale))
-        $g.FillEllipse($pinkBrush, [float](432.0 * $scale), [float](94.0 * $scale), [float](12.0 * $scale), [float](12.0 * $scale))
-    }
-
+    $g.ScaleTransform(($size / 512.0), ($size / 512.0))
+    $tile = New-RoundedRectangle ([System.Drawing.RectangleF]::new(12, 12, 488, 488)) 108
+    $white = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::White)
+    $teal = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(0, 107, 120))
+    $g.FillPath($white, $tile)
+    $mark = [System.Drawing.Drawing2D.GraphicsPath]::new()
+    $mark.AddLine(386, 112, 226, 112)
+    $mark.AddBezier(226,112,204,112,188,120,176,140)
+    $mark.AddLine(176,140,106,246)
+    $mark.AddBezier(106,246,94,268,110,290,142,290)
+    $mark.AddLine(142,290,226,290)
+    $mark.AddLine(226,290,266,230)
+    $mark.AddLine(266,230,174,230)
+    $mark.AddLine(174,230,222,166)
+    $mark.AddLine(222,166,350,166)
+    $mark.CloseFigure()
+    $g.FillPath($teal, $mark)
+    $rotation = [System.Drawing.Drawing2D.Matrix]::new()
+    $rotation.RotateAt(180, [System.Drawing.PointF]::new(256,256))
+    $mark.Transform($rotation)
+    $g.FillPath($teal, $mark)
+    $rotation.Dispose()
+    $mark.Dispose()
+    $tile.Dispose()
+    $white.Dispose()
+    $teal.Dispose()
     $g.Dispose()
     return $bmp
 }
@@ -91,7 +60,7 @@ $sizes = @(16, 24, 32, 48, 64, 128, 256)
 $images = @()
 
 foreach ($s in $sizes) {
-    $bmp = Render-LosslessLogo $s
+    $bmp = Render-RateMatchLogo $s
     $ms = New-Object System.IO.MemoryStream
     $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
     $images += [PSCustomObject]@{
@@ -99,12 +68,14 @@ foreach ($s in $sizes) {
         Bytes = $ms.ToArray()
     }
     if ($s -eq 256) {
-        $bmp.Save("D:\Project-Web\lossless-switcher-x64\assets\logo.png", [System.Drawing.Imaging.ImageFormat]::Png)
+        $bmp.Save((Join-Path $PSScriptRoot "logo.png"), [System.Drawing.Imaging.ImageFormat]::Png)
     }
+    $bmp.Dispose()
+    $ms.Dispose()
 }
 
 # Write multi-frame ICO file
-$icoPath = "D:\Project-Web\lossless-switcher-x64\assets\app.ico"
+$icoPath = (Join-Path $PSScriptRoot "app.ico")
 $fs = [System.IO.File]::Open($icoPath, [System.IO.FileMode]::Create)
 $bw = New-Object System.IO.BinaryWriter($fs)
 
@@ -136,4 +107,4 @@ $bw.Flush()
 $bw.Close()
 $fs.Close()
 
-Write-Output "Successfully generated flat assets\logo.png and assets\app.ico!"
+Write-Output "Successfully generated RateMatch assets\logo.png and assets\app.ico!"

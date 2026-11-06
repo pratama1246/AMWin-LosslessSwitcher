@@ -1,7 +1,7 @@
-; Inno Setup Script for LosslessSwitcher For Apple Music (Win)
-#define MyAppName "LosslessSwitcher For Apple Music"
+; Inno Setup Script for RateMatch
+#define MyAppName "RateMatch"
 #define MyAppShortName "AMWin-LosslessSwitcher"
-#define MyAppVersion "0.3.2"
+#define MyAppVersion "0.3.4"
 #define MyAppPublisher "Pratama Putra"
 #define MyAppURL "https://github.com/pratama1246/AMWin-LosslessSwitcher"
 #define MyAppExeName "lossless-switcher-am.exe"
@@ -19,7 +19,7 @@ DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 LicenseFile=..\LICENSE
 OutputDir=..\dist
-OutputBaseFilename=AMWin-LosslessSwitcher-Setup-v{#MyAppVersion}
+OutputBaseFilename=RateMatch-Setup-v{#MyAppVersion}
 SetupIconFile=..\assets\app.ico
 Compression=lzma2/ultra64
 SolidCompression=yes
@@ -54,6 +54,8 @@ Source: "..\target\release\{#MyAppExeName}"; DestDir: "{app}"; Flags: ignorevers
 Source: "..\assets\app.ico"; DestDir: "{app}"; Flags: ignoreversion
 Source: "README.txt"; DestDir: "{app}"; Flags: ignoreversion isreadme
 Source: "..\LICENSE"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\PRIVACY.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "..\TERMS.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\app.ico"

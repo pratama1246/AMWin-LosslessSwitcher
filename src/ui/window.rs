@@ -7,7 +7,7 @@ use windows::Win32::System::Threading::CreateMutexW;
 use windows::Win32::Graphics::Gdi::{
     CreateFontW, DeleteObject, HFONT, FW_NORMAL, FW_BOLD, UpdateWindow, HBITMAP, HBRUSH,
     GetDC, ReleaseDC, CreateCompatibleDC, DeleteDC, CreateCompatibleBitmap,
-    SelectObject, CreateSolidBrush, FillRect, CreatePen, Rectangle,
+    SelectObject, CreateSolidBrush, FillRect, CreatePen,
     SetBkMode, SetTextColor, DrawTextW, PS_SOLID, TRANSPARENT,
     DT_CENTER, DT_VCENTER, DT_SINGLELINE,
     InvalidateRect, MapWindowPoints,
@@ -158,9 +158,18 @@ struct WindowState {
     coordinator: Arc<Coordinator>,
     font: HFONT,
     font_bold: HFONT,
+    font_artist: HFONT,
     font_title: HFONT,
     font_sub: HFONT,
     tab_ctrl: HWND,
+    current_page: usize,
+    mini_mode: bool,
+    normal_rect: RECT,
+    mini_format: HWND,
+    mini_status: HWND,
+    mini_color: u32,
+    mini_tooltip: HWND,
+    mini_tip: Vec<u16>,
     tab0_controls: Vec<HWND>,
     tab1_controls: Vec<HWND>,
     tab2_controls: Vec<HWND>,
@@ -176,6 +185,9 @@ struct WindowState {
     ctrl_artwork: HWND,
     ctrl_logo: HWND,
     label_track: HWND,
+    label_artist: HWND,
+    label_album: HWND,
+    label_device: HWND,
     label_formats: HWND,
     label_status: HWND,
     cached_devices: Vec<AudioDeviceInfo>,
@@ -197,6 +209,7 @@ unsafe impl Sync for WindowState {}
 static APP_STATE: Mutex<Option<WindowState>> = Mutex::new(None);
 static INITIAL_COORDINATOR: Mutex<Option<Arc<Coordinator>>> = Mutex::new(None);
 static GDIPLUS_TOKEN: Mutex<usize> = Mutex::new(0);
+static DISPLAY_BRUSH: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
 static BG_BRUSH: std::sync::atomic::AtomicIsize = std::sync::atomic::AtomicIsize::new(0);
 
 unsafe fn get_bg_brush() -> HBRUSH {
@@ -204,7 +217,7 @@ unsafe fn get_bg_brush() -> HBRUSH {
     if raw != 0 {
         HBRUSH(raw as *mut _)
     } else {
-        let b = CreateSolidBrush(COLORREF(0x00F9F9F9));
+        let b = CreateSolidBrush(COLORREF(0x00F7F5F3));
         BG_BRUSH.store(b.0 as isize, std::sync::atomic::Ordering::Relaxed);
         b
     }
@@ -271,7 +284,7 @@ pub fn run_app() {
             hInstance: hinstance.into(),
             hIcon: app_icon,
             hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
-            hbrBackground: CreateSolidBrush(COLORREF(0x00F9F9F9)),
+            hbrBackground: CreateSolidBrush(COLORREF(0x00F7F5F3)),
             lpszMenuName: PCWSTR::null(),
             lpszClassName: class_name,
             hIconSm: app_icon,
@@ -313,7 +326,7 @@ pub fn run_app() {
 
         let start_in_tray = std::env::args().any(|a| a == "--minimized" || a == "--tray");
 
-        let window_title = w!("LosslessSwitcher For Apple Music");
+        let window_title = w!("RateMatch");
         let hwnd = CreateWindowExW(
             WINDOW_EX_STYLE(0),
             class_name,
@@ -322,7 +335,7 @@ pub fn run_app() {
             CW_USEDEFAULT,
             CW_USEDEFAULT,
             scale_val(505, scale),
-            scale_val(420, scale),
+            scale_val(440, scale),
             None,
             None,
             hinstance,
@@ -358,6 +371,7 @@ pub fn run_app() {
 
         let mut msg = MSG::default();
         while GetMessageW(&mut msg, None, 0, 0).as_bool() {
+            if windows::Win32::UI::WindowsAndMessaging::IsDialogMessageW(hwnd, &msg).as_bool() { continue; }
             let _ = TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
@@ -383,16 +397,17 @@ unsafe extern "system" fn collect_child(h: HWND, lparam: LPARAM) -> windows::Win
 /// Window calls run without APP_STATE locked because child resizes can re-enter wnd_proc.
 unsafe fn apply_dpi(dpi: u32) {
     let scale = dpi as f32 / 96.0;
-    let (rects, old_font, old_bold, old_title, old_sub) = match APP_STATE.lock() {
+    let (rects, old_font, old_bold, old_title, old_sub, old_artist) = match APP_STATE.lock() {
         Ok(g) => match g.as_ref() {
-            Some(s) => (s.base_rects.clone(), s.font, s.font_bold, s.font_title, s.font_sub),
+            Some(s) => (s.base_rects.clone(), s.font, s.font_bold, s.font_title, s.font_sub, s.font_artist),
             None => return,
         },
         Err(_) => return,
     };
 
     let face = w!("Segoe UI");
-    let font_title = CreateFontW(scale_val(-16, scale), 0, 0, 0, FW_BOLD.0 as i32, 0, 0, 0, 0, 0, 0, 0, 0, face);
+    let font_title = CreateFontW(scale_val(-20, scale), 0, 0, 0, FW_BOLD.0 as i32, 0, 0, 0, 0, 0, 0, 0, 0, face);
+    let font_artist = CreateFontW(scale_val(-16, scale), 0, 0, 0, FW_NORMAL.0 as i32, 0, 0, 0, 0, 0, 0, 0, 0, face);
     let font_bold = CreateFontW(scale_val(-13, scale), 0, 0, 0, FW_BOLD.0 as i32, 0, 0, 0, 0, 0, 0, 0, 0, face);
     let font = CreateFontW(scale_val(-12, scale), 0, 0, 0, FW_NORMAL.0 as i32, 0, 0, 0, 0, 0, 0, 0, 0, face);
     let font_sub = CreateFontW(scale_val(-11, scale), 0, 0, 0, FW_NORMAL.0 as i32, 0, 0, 0, 0, 0, 0, 0, 0, face);
@@ -410,6 +425,8 @@ unsafe fn apply_dpi(dpi: u32) {
         let cur = SendMessageW(h, WM_GETFONT, WPARAM(0), LPARAM(0)).0;
         let f = if cur == old_title.0 as isize {
             font_title
+        } else if cur == old_artist.0 as isize {
+            font_artist
         } else if cur == old_bold.0 as isize {
             font_bold
         } else if cur == old_sub.0 as isize {
@@ -424,9 +441,10 @@ unsafe fn apply_dpi(dpi: u32) {
         && let Some(ref mut s) = *guard {
             s.font = font;
             s.font_bold = font_bold;
+            s.font_artist = font_artist;
             s.font_title = font_title;
             s.font_sub = font_sub;
-            s.artwork_size = scale_val(145, scale);
+            s.artwork_size = scale_val(if s.mini_mode { 56 } else { 112 }, scale);
             let new_default = create_default_artwork_bitmap(s.artwork_size);
             SendMessageW(s.ctrl_artwork, STM_SETIMAGE, WPARAM(IMAGE_BITMAP), LPARAM(new_default.0 as isize));
             let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(s.default_hbitmap.0 as *mut _));
@@ -447,6 +465,7 @@ unsafe fn apply_dpi(dpi: u32) {
         }
     let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(old_font.0 as *mut _));
     let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(old_bold.0 as *mut _));
+    let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(old_artist.0 as *mut _));
     let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(old_title.0 as *mut _));
     let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(old_sub.0 as *mut _));
     let _ = InvalidateRect(None, None, true);
@@ -454,6 +473,10 @@ unsafe fn apply_dpi(dpi: u32) {
 
 unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     match msg {
+        windows::Win32::UI::WindowsAndMessaging::WM_NCHITTEST => {
+            let mini = APP_STATE.try_lock().ok().and_then(|g| g.as_ref().map(|s| s.mini_mode)).unwrap_or(false);
+            if mini { LRESULT(2) } else { DefWindowProcW(hwnd, msg, wparam, lparam) }
+        }
         WM_DPICHANGED => {
             let r = &*(lparam.0 as *const RECT);
             let _ = SetWindowPos(
@@ -466,6 +489,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 SWP_NOZORDER | SWP_NOACTIVATE,
             );
             apply_dpi((wparam.0 & 0xFFFF) as u32);
+            layout_mini(hwnd);
             LRESULT(0)
         }
         WM_CREATE => {
@@ -478,12 +502,34 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             add_tray_icon(hwnd);
             LRESULT(0)
         }
+        windows::Win32::UI::WindowsAndMessaging::WM_DRAWITEM => {
+            let item = &*(lparam.0 as *const windows::Win32::UI::Controls::DRAWITEMSTRUCT);
+            if matches!(item.CtlID, 403..=405) {
+                draw_surface(item);
+                return LRESULT(1);
+            }
+            DefWindowProcW(hwnd, msg, wparam, lparam)
+        }
         WM_CTLCOLORSTATIC | WM_CTLCOLORBTN | WM_CTLCOLORDLG => {
             let hdc = windows::Win32::Graphics::Gdi::HDC(wparam.0 as _);
             SetBkMode(hdc, TRANSPARENT);
             let ctrl_hwnd = HWND(lparam.0 as *mut _);
             if let Ok(guard) = APP_STATE.try_lock()
                 && let Some(ref state) = *guard {
+                    if ctrl_hwnd == state.label_formats {
+                        SetTextColor(hdc, COLORREF(0x00F7F5F3));
+                        let mut raw = DISPLAY_BRUSH.load(std::sync::atomic::Ordering::Relaxed);
+                        if raw == 0 {
+                            raw = CreateSolidBrush(COLORREF(0x002E2620)).0 as isize;
+                            DISPLAY_BRUSH.store(raw, std::sync::atomic::Ordering::Relaxed);
+                        }
+                        return LRESULT(raw);
+                    }
+                    if ctrl_hwnd == state.mini_status {
+                        SetTextColor(hdc, COLORREF(state.mini_color));
+                        return LRESULT(get_bg_brush().0 as isize);
+                    }
+                    SetTextColor(hdc, COLORREF(0x002B2118));
                     if state.muted_labels.contains(&ctrl_hwnd) {
                         SetTextColor(hdc, COLORREF(0x006E6E6E));
                     } else if state.title_labels.contains(&ctrl_hwnd) {
@@ -503,7 +549,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 && let Some(ref mut state) = *guard
                     && lparam.0 == state.trackbar_delay.0 as isize {
                         let pos = SendMessageW(state.trackbar_delay, TBM_GETPOS, WPARAM(0), LPARAM(0)).0 as u64;
-                        let text = format!("DAC Delay: {} ms", pos);
+                        let text = format!("Settling delay: {} ms", pos);
                         set_window_text(state.label_delay, &text);
                         state.coordinator.set_settling_delay(pos);
                     }
@@ -513,6 +559,15 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
         WM_COMMAND => {
             let cmd_id = (wparam.0 & 0xFFFF) as isize;
             match cmd_id {
+                2 => {
+                    let mini = APP_STATE.lock().ok().and_then(|g| g.as_ref().map(|s| s.mini_mode)).unwrap_or(false);
+                    if mini { toggle_mini(hwnd); }
+                }
+                406 | 407 => toggle_mini(hwnd),
+                403 => show_page(hwnd, 0),
+                404 => show_page(hwnd, 1),
+                401 => show_page(hwnd, 2),
+                402 => show_page(hwnd, 1),
                 ID_RADIO_SEAMLESS => {
                     if let Ok(mut guard) = APP_STATE.lock()
                         && let Some(ref mut state) = *guard {
@@ -588,7 +643,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                                 WPARAM(IMAGE_BITMAP),
                                 LPARAM(state.default_hbitmap.0 as isize),
                             );
-                            set_window_text(state.label_status, "Status: Cache cleared! Next track will refresh.");
+                            set_window_text(state.label_status, "Cache cleared. Metadata will refresh on the next track.");
                         }
                 }
                 ID_BTN_GITHUB => {
@@ -665,36 +720,8 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
             if !p_nmhdr.is_null() {
                 let code = (*p_nmhdr).code;
                 if code == TCN_SELCHANGE {
-                    let controls = {
-                        if let Ok(guard) = APP_STATE.lock() {
-                            if let Some(ref state) = *guard {
-                                let sel = SendMessageW(state.tab_ctrl, TCM_GETCURSEL, WPARAM(0), LPARAM(0)).0 as usize;
-                                Some((sel, state.tab0_controls.clone(), state.tab1_controls.clone(), state.tab2_controls.clone()))
-                            } else {
-                                None
-                            }
-                        } else {
-                            None
-                        }
-                    };
-
-                    if let Some((sel, tab0, tab1, tab2)) = controls {
-                        let show_tab0 = if sel == 0 { SW_SHOW } else { SW_HIDE };
-                        let show_tab1 = if sel == 1 { SW_SHOW } else { SW_HIDE };
-                        let show_tab2 = if sel == 2 { SW_SHOW } else { SW_HIDE };
-
-                        for ctrl in tab0 {
-                            let _ = ShowWindow(ctrl, show_tab0);
-                        }
-                        for ctrl in tab1 {
-                            let _ = ShowWindow(ctrl, show_tab1);
-                        }
-                        for ctrl in tab2 {
-                            let _ = ShowWindow(ctrl, show_tab2);
-                        }
-                        let _ = InvalidateRect(hwnd, None, true);
-                        let _ = UpdateWindow(hwnd);
-                    }
+                    let sel = APP_STATE.lock().ok().and_then(|g| g.as_ref().map(|s| SendMessageW(s.tab_ctrl, TCM_GETCURSEL, WPARAM(0), LPARAM(0)).0 as usize));
+                    if let Some(sel) = sel { show_page(hwnd, sel); }
                 }
             }
             LRESULT(0)
@@ -737,6 +764,10 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 && let Some(ref state) = *guard {
                     state.coordinator.shutdown();
                 }
+            let display = DISPLAY_BRUSH.swap(0, std::sync::atomic::Ordering::Relaxed);
+            if display != 0 {
+                let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(display as *mut _));
+            }
             let raw = BG_BRUSH.swap(0, std::sync::atomic::Ordering::Relaxed);
             if raw != 0 {
                 let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(raw as *mut _));
@@ -745,6 +776,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                 && let Some(ref mut state) = *guard {
                     let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(state.font.0 as *mut _));
                     let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(state.font_bold.0 as *mut _));
+                    let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(state.font_artist.0 as *mut _));
                     let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(state.font_title.0 as *mut _));
                     let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(state.font_sub.0 as *mut _));
                     let _ = DeleteObject(windows::Win32::Graphics::Gdi::HGDIOBJ(state.default_hbitmap.0 as *mut _));
@@ -762,6 +794,125 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
     }
 }
 
+unsafe fn toggle_mini(hwnd: HWND) {
+    use windows::Win32::UI::WindowsAndMessaging::{GetWindowLongPtrW, SetWindowLongPtrW, GWL_STYLE, SWP_FRAMECHANGED};
+    let (mini, normal, top) = {
+        let mut guard = APP_STATE.lock().unwrap();
+        let Some(s) = guard.as_mut() else { return; };
+        if !s.mini_mode { let _ = windows::Win32::UI::WindowsAndMessaging::GetWindowRect(hwnd, &mut s.normal_rect); }
+        s.mini_mode = !s.mini_mode;
+        (s.mini_mode, s.normal_rect, s.is_always_on_top)
+    };
+    let chrome = (WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX).0 as isize;
+    let style = GetWindowLongPtrW(hwnd, GWL_STYLE);
+    SetWindowLongPtrW(hwnd, GWL_STYLE, if mini { style & !chrome } else { style | chrome });
+    let dpi = GetDpiForWindow(hwnd).max(96);
+    let scale = dpi as f32 / 96.0;
+    let rect = if mini { RECT { left: normal.left, top: normal.top, right: normal.left + scale_val(480, scale), bottom: normal.top + scale_val(88, scale) } } else { normal };
+    let _ = SetWindowPos(hwnd, if mini || top { HWND_TOPMOST } else { HWND_NOTOPMOST }, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, SWP_FRAMECHANGED | SWP_NOACTIVATE);
+    apply_dpi(dpi);
+    show_page(hwnd, if mini { 3 } else { 0 });
+    for id in [403, 404, 406] {
+        if let Ok(button) = windows::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, id) { let _ = ShowWindow(button, if mini { SW_HIDE } else { SW_SHOW }); }
+    }
+    layout_mini(hwnd);
+    update_status_display();
+}
+
+unsafe fn layout_mini(hwnd: HWND) {
+    let controls = {
+        let guard = APP_STATE.lock().unwrap();
+        let Some(s) = guard.as_ref() else { return; };
+        let mini = s.mini_mode;
+        let controls = if mini { vec![(s.ctrl_artwork, 12, 14, 56, 56, s.font), (s.label_track, 80, 12, 190, 20, s.font_bold), (s.label_artist, 80, 34, 190, 18, s.font), (s.label_album, 80, 54, 190, 18, s.font_sub), (s.mini_format, 284, 22, 156, 22, s.font_bold), (s.mini_status, 284, 48, 156, 20, s.font)] } else { vec![(s.label_track, 156, 68, 306, 54, s.font_title), (s.label_artist, 156, 128, 306, 28, s.font_artist)] };
+        (mini, controls, s.mini_format, s.mini_status)
+    };
+    let scale = GetDpiForWindow(hwnd).max(96) as f32 / 96.0;
+    for (control, x, y, width, height, font) in controls.1 {
+        let _ = SetWindowPos(control, HWND::default(), scale_val(x, scale), scale_val(y, scale), scale_val(width, scale), scale_val(height, scale), SWP_NOZORDER | SWP_NOACTIVATE);
+        SendMessageW(control, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
+        let _ = ShowWindow(control, SW_SHOW);
+    }
+    for control in [controls.2, controls.3] { let _ = ShowWindow(control, if controls.0 { SW_SHOW } else { SW_HIDE }); }
+    if let Ok(button) = windows::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, 407) {
+        let _ = SetWindowPos(button, HWND::default(), scale_val(444, scale), scale_val(10, scale), scale_val(26, scale), scale_val(26, scale), SWP_NOZORDER | SWP_NOACTIVATE);
+        let _ = ShowWindow(button, if controls.0 { SW_SHOW } else { SW_HIDE });
+    }
+    let _ = InvalidateRect(hwnd, None, true);
+}
+
+unsafe fn draw_surface(item: &windows::Win32::UI::Controls::DRAWITEMSTRUCT) {
+    let Ok(guard) = APP_STATE.try_lock() else { return; };
+    let Some(state) = guard.as_ref() else { return; };
+    let dc = item.hDC;
+    let rc = item.rcItem;
+    let scale = GetDpiForWindow(item.hwndItem).max(96) as f32 / 96.0;
+    let panel = item.CtlID == 405;
+    let active = (item.CtlID == 403 && state.current_page == 0) || (item.CtlID == 404 && state.current_page != 0);
+    let color = if panel { 0x002E2620 } else if active { 0x00EDE4DE } else { 0x00FFFFFF };
+    FillRect(dc, &rc, get_bg_brush());
+    let brush = CreateSolidBrush(COLORREF(color));
+    let pen = CreatePen(PS_SOLID, 1, COLORREF(color));
+    let old_brush = SelectObject(dc, brush);
+    let old_pen = SelectObject(dc, pen);
+    let radius = scale_val(12, scale);
+    let _ = windows::Win32::Graphics::Gdi::RoundRect(dc, rc.left, rc.top, rc.right, rc.bottom, radius, radius);
+    SelectObject(dc, old_brush);
+    SelectObject(dc, old_pen);
+    let _ = DeleteObject(brush);
+    let _ = DeleteObject(pen);
+    SetBkMode(dc, TRANSPARENT);
+    let mut buffer = [0u16; 512];
+    let len = windows::Win32::UI::WindowsAndMessaging::GetWindowTextW(item.hwndItem, &mut buffer);
+    let text = String::from_utf16_lossy(&buffer[..len as usize]);
+    let old_font = SelectObject(dc, state.font);
+    if panel {
+        let values: Vec<&str> = text.lines().map(|line| line.split_once(": ").map(|(_, value)| value).unwrap_or("—")).collect();
+        for (index, heading) in ["RESOLVED SOURCE", "OUTPUT"].iter().enumerate() {
+            let x = rc.left + scale_val(20, scale) + index as i32 * (rc.right - rc.left) / 2;
+            let mut header_rect = RECT { left: x, top: rc.top + scale_val(12, scale), right: x + (rc.right - rc.left) / 2 - scale_val(28, scale), bottom: rc.top + scale_val(28, scale) };
+            SetTextColor(dc, COLORREF(0x00C8BDB4));
+            SelectObject(dc, state.font_sub);
+            let mut label: Vec<u16> = heading.encode_utf16().collect();
+            DrawTextW(dc, &mut label, &mut header_rect, DT_SINGLELINE);
+            let mut value_rect = RECT { top: rc.top + scale_val(36, scale), bottom: rc.bottom - scale_val(8, scale), ..header_rect };
+            SelectObject(dc, state.font_title);
+            SetTextColor(dc, COLORREF(0x00F7F5F3));
+            let mut value: Vec<u16> = values.get(index).unwrap_or(&"—").encode_utf16().collect();
+            DrawTextW(dc, &mut value, &mut value_rect, DT_SINGLELINE | windows::Win32::Graphics::Gdi::DT_END_ELLIPSIS);
+        }
+    } else {
+        SelectObject(dc, if active { state.font_bold } else { state.font });
+        SetTextColor(dc, COLORREF(if active { 0x00786B00 } else { 0x0073665C }));
+        let mut text_rect = rc;
+        let mut label: Vec<u16> = text.encode_utf16().collect();
+        DrawTextW(dc, &mut label, &mut text_rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        if item.itemState.0 & 0x0010 != 0 && item.itemState.0 & 0x0200 == 0 {
+            let mut focus = rc;
+            let inset = scale_val(3, scale);
+            focus.left += inset; focus.top += inset; focus.right -= inset; focus.bottom -= inset;
+            let _ = windows::Win32::Graphics::Gdi::DrawFocusRect(dc, &focus);
+        }
+    }
+    SelectObject(dc, old_font);
+}
+
+unsafe fn show_page(hwnd: HWND, page: usize) {
+    let pages = APP_STATE.lock().ok().and_then(|g| g.as_ref().map(|s| [s.tab0_controls.clone(), s.tab1_controls.clone(), s.tab2_controls.clone()]));
+    if let Ok(mut g) = APP_STATE.lock() { if let Some(s) = g.as_mut() { s.current_page = page; } }
+    for id in [403, 404] {
+        if let Ok(button) = windows::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, id) {
+            let _ = InvalidateRect(button, None, true);
+        }
+    }
+    if let Some(pages) = pages {
+        for (index, controls) in pages.iter().enumerate() {
+            for &control in controls { let _ = ShowWindow(control, if index == page { SW_SHOW } else { SW_HIDE }); }
+        }
+        let _ = InvalidateRect(hwnd, None, true);
+    }
+}
+
 unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
     let hinstance = windows::Win32::System::LibraryLoader::GetModuleHandleW(None).unwrap();
 
@@ -770,9 +921,10 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
 
     let font_name = w!("Segoe UI");
     let font_title = CreateFontW(
-        scale_val(-16, scale), 0, 0, 0, FW_BOLD.0 as i32, 0, 0, 0,
+        scale_val(-20, scale), 0, 0, 0, FW_BOLD.0 as i32, 0, 0, 0,
         0, 0, 0, 0, 0, font_name,
     );
+    let font_artist = CreateFontW(scale_val(-16, scale), 0, 0, 0, FW_NORMAL.0 as i32, 0, 0, 0, 0, 0, 0, 0, 0, font_name);
     let font_bold = CreateFontW(
         scale_val(-13, scale), 0, 0, 0, FW_BOLD.0 as i32, 0, 0, 0,
         0, 0, 0, 0, 0, font_name,
@@ -791,11 +943,11 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
         WINDOW_EX_STYLE(0),
         w!("SysTabControl32"),
         w!(""),
-        WS_CHILD | WS_VISIBLE | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(0),
+        WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(0x0108),
         scale_val(12, scale),
         scale_val(10, scale),
         scale_val(465, scale),
-        scale_val(355, scale),
+        scale_val(32, scale),
         parent,
         HMENU(ID_TAB_CONTROL as *mut _),
         hinstance,
@@ -803,7 +955,7 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
     ).unwrap();
     SendMessageW(tab_ctrl, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
 
-    for (i, title) in ["Now Playing", "Audio Settings", "About"].iter().enumerate() {
+    for (i, title) in ["Now playing", "Settings"].iter().enumerate() {
         let mut tab_text: Vec<u16> = title.encode_utf16().chain(std::iter::once(0)).collect();
         let mut tie = TCITEMW {
             mask: TCIF_TEXT,
@@ -817,90 +969,80 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
         SendMessageW(tab_ctrl, TCM_INSERTITEMW, WPARAM(i), LPARAM(&mut tie as *mut _ as isize));
     }
 
-    // Tab 0: Now Playing (visible by default)
-    let artwork_size = scale_val(145, scale);
-    let ctrl_artwork = create_ctrl(
-        w!("STATIC"), w!(""),
-        WS_CHILD | WS_VISIBLE | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_BITMAP | SS_CENTERIMAGE),
-        scale_val(28, scale), scale_val(50, scale), artwork_size, artwork_size, parent, Some(ID_ARTWORK), hinstance,
-    );
+    for (id, text, x, width) in [(403, w!("Now playing"), 24, 128), (404, w!("Settings"), 160, 100)] {
+        let button = create_ctrl(w!("BUTTON"), text, WS_CHILD | WS_VISIBLE | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(0x000B),
+            scale_val(x, scale), scale_val(16, scale), scale_val(width, scale), scale_val(32, scale), parent, Some(id), hinstance);
+        SendMessageW(button, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
+    }
 
+    let mini_button = create_ctrl(w!("BUTTON"), w!("Mini mode"), WS_CHILD | WS_VISIBLE,
+        scale_val(352, scale), scale_val(16, scale), scale_val(110, scale), scale_val(30, scale), parent, Some(406), hinstance);
+    SendMessageW(mini_button, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
+    let expand_button = create_ctrl(w!("BUTTON"), w!("↗"), WS_CHILD,
+        0, 0, scale_val(28, scale), scale_val(28, scale), parent, Some(407), hinstance);
+    SendMessageW(expand_button, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
+    let mini_format = create_ctrl(w!("STATIC"), w!("— kHz / — bit"), WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX | 0x4000),
+        0, 0, scale_val(166, scale), scale_val(22, scale), parent, None, hinstance);
+    SendMessageW(mini_format, WM_SETFONT, WPARAM(font_bold.0 as usize), LPARAM(1));
+    let mini_status = create_ctrl(w!("STATIC"), w!("Idle"), WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX | 0x4000),
+        0, 0, scale_val(166, scale), scale_val(20, scale), parent, None, hinstance);
+    SendMessageW(mini_status, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
+
+    let artwork_size = scale_val(112, scale);
+    let ctrl_artwork = create_ctrl(w!("STATIC"), w!(""), WS_CHILD | WS_VISIBLE | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_BITMAP | SS_CENTERIMAGE),
+        scale_val(24, scale), scale_val(68, scale), artwork_size, artwork_size, parent, Some(ID_ARTWORK), hinstance);
     let default_hbitmap = create_default_artwork_bitmap(artwork_size);
-    SendMessageW(
-        ctrl_artwork,
-        STM_SETIMAGE,
-        WPARAM(IMAGE_BITMAP),
-        LPARAM(default_hbitmap.0 as isize),
-    );
-
-    let info_x = scale_val(190, scale);
-    let info_w = scale_val(270, scale);
-
-    let label_track = create_ctrl(
-        w!("STATIC"), w!("Track: Waiting for Apple Music..."),
-        WS_CHILD | WS_VISIBLE | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX),
-        info_x, scale_val(50, scale), info_w, scale_val(40, scale), parent, None, hinstance,
-    );
-    SendMessageW(label_track, WM_SETFONT, WPARAM(font_bold.0 as usize), LPARAM(1));
-
-    let label_formats = create_ctrl(
-        w!("STATIC"), w!("Source: -\nDAC: -"),
-        WS_CHILD | WS_VISIBLE | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX),
-        info_x, scale_val(96, scale), info_w, scale_val(36, scale), parent, None, hinstance,
-    );
-    SendMessageW(label_formats, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
-
-    let label_status = create_ctrl(
-        w!("STATIC"), w!("Status: Ready & waiting for playback..."),
-        WS_CHILD | WS_VISIBLE | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX),
-        info_x, scale_val(138, scale), info_w, scale_val(52, scale), parent, None, hinstance,
-    );
-    SendMessageW(label_status, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
-
-    // Hide to Tray button placed neatly at bottom-left directly under album artwork
-    let btn_min = create_ctrl(
-        w!("BUTTON"), w!("Hide to Tray"),
-        WS_CHILD | WS_VISIBLE | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(windows::Win32::UI::WindowsAndMessaging::BS_PUSHBUTTON as u32),
-        scale_val(28, scale), scale_val(212, scale), artwork_size, scale_val(32, scale), parent, Some(ID_BTN_MINIMIZE), hinstance,
-    );
-    SendMessageW(btn_min, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
-
-    let tab0_controls = vec![
-        ctrl_artwork,
-        label_track,
-        label_formats,
-        label_status,
-        btn_min,
-    ];
+    SendMessageW(ctrl_artwork, STM_SETIMAGE, WPARAM(IMAGE_BITMAP), LPARAM(default_hbitmap.0 as isize));
+    let label_track = create_ctrl(w!("STATIC"), w!("Ready when you are"), WS_CHILD | WS_VISIBLE | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX | 0x4000),
+        scale_val(156, scale), scale_val(68, scale), scale_val(306, scale), scale_val(54, scale), parent, None, hinstance);
+    let label_artist = create_ctrl(w!("STATIC"), w!("Play a song in Apple Music to begin."), WS_CHILD | WS_VISIBLE | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX | 0x4000),
+        scale_val(156, scale), scale_val(128, scale), scale_val(306, scale), scale_val(28, scale), parent, None, hinstance);
+    let label_album = create_ctrl(w!("STATIC"), w!(""), WS_CHILD | WS_VISIBLE | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX | 0x4000),
+        scale_val(156, scale), scale_val(156, scale), scale_val(306, scale), scale_val(24, scale), parent, None, hinstance);
+    let label_formats = create_ctrl(w!("STATIC"), w!("Resolved source: —\r\nOutput: —"), WS_CHILD | WS_VISIBLE | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(0x000D),
+        scale_val(24, scale), scale_val(208, scale), scale_val(438, scale), scale_val(76, scale), parent, Some(405), hinstance);
+    let label_status = create_ctrl(w!("STATIC"), w!("Waiting for Apple Music playback"), WS_CHILD | WS_VISIBLE | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX),
+        scale_val(24, scale), scale_val(296, scale), scale_val(438, scale), scale_val(36, scale), parent, None, hinstance);
+    let label_device = create_ctrl(w!("STATIC"), w!("Windows default output"), WS_CHILD | WS_VISIBLE | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX | 0x4000),
+        scale_val(24, scale), scale_val(350, scale), scale_val(282, scale), scale_val(36, scale), parent, None, hinstance);
+    let btn_min = create_ctrl(w!("BUTTON"), w!("Hide to tray"), WS_CHILD | WS_VISIBLE,
+        scale_val(326, scale), scale_val(348, scale), scale_val(136, scale), scale_val(32, scale), parent, Some(ID_BTN_MINIMIZE), hinstance);
+    for h in [label_album, label_status, label_device, btn_min] {
+        SendMessageW(h, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
+    }
+    SendMessageW(label_artist, WM_SETFONT, WPARAM(font_artist.0 as usize), LPARAM(1));
+    SendMessageW(label_track, WM_SETFONT, WPARAM(font_title.0 as usize), LPARAM(1));
+    SendMessageW(label_formats, WM_SETFONT, WPARAM(font_bold.0 as usize), LPARAM(1));
+    let tab0_controls = vec![ctrl_artwork, label_track, label_artist, label_album, label_formats, label_status, label_device, btn_min];
 
     // Tab 1: Audio Settings (hidden by default)
     let grp_device = create_ctrl(
-        w!("BUTTON"), w!(" Output Device "),
-        WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(windows::Win32::UI::WindowsAndMessaging::BS_GROUPBOX as u32),
-        scale_val(24, scale), scale_val(44, scale), scale_val(441, scale), scale_val(60, scale), parent, None, hinstance,
+        w!("STATIC"), w!("Audio output"),
+        WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX),
+        scale_val(24, scale), scale_val(60, scale), scale_val(441, scale), scale_val(18, scale), parent, None, hinstance,
     );
-    SendMessageW(grp_device, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
+    SendMessageW(grp_device, WM_SETFONT, WPARAM(font_bold.0 as usize), LPARAM(1));
 
     let combo_devices = create_ctrl(
         w!("COMBOBOX"), w!(""),
         WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(CBS_DROPDOWNLIST) | WS_GROUP,
-        scale_val(38, scale), scale_val(64, scale), scale_val(325, scale), scale_val(180, scale), parent, Some(ID_DEVICE_COMBO), hinstance,
+        scale_val(38, scale), scale_val(80, scale), scale_val(325, scale), scale_val(180, scale), parent, Some(ID_DEVICE_COMBO), hinstance,
     );
     SendMessageW(combo_devices, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
 
     let btn_refresh = create_ctrl(
         w!("BUTTON"), w!("Refresh"),
         WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(windows::Win32::UI::WindowsAndMessaging::BS_PUSHBUTTON as u32),
-        scale_val(373, scale), scale_val(63, scale), scale_val(80, scale), scale_val(26, scale), parent, Some(ID_BTN_REFRESH), hinstance,
+        scale_val(373, scale), scale_val(79, scale), scale_val(80, scale), scale_val(26, scale), parent, Some(ID_BTN_REFRESH), hinstance,
     );
     SendMessageW(btn_refresh, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
 
     let grp_mode = create_ctrl(
-        w!("BUTTON"), w!(" Switcher Mode "),
-        WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(windows::Win32::UI::WindowsAndMessaging::BS_GROUPBOX as u32),
-        scale_val(24, scale), scale_val(110, scale), scale_val(441, scale), scale_val(68, scale), parent, None, hinstance,
+        w!("STATIC"), w!("Switching mode"),
+        WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX),
+        scale_val(24, scale), scale_val(126, scale), scale_val(441, scale), scale_val(18, scale), parent, None, hinstance,
     );
-    SendMessageW(grp_mode, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
+    SendMessageW(grp_mode, WM_SETFONT, WPARAM(font_bold.0 as usize), LPARAM(1));
 
     let saved_settings = crate::config::load_settings();
     let (chk_seamless, chk_purist) = if saved_settings.mode == SwitcherMode::Purist {
@@ -910,32 +1052,32 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
     };
 
     let radio_seamless = create_ctrl(
-        w!("BUTTON"), w!("Seamless (Recommended - switches sample rate without audio pop)"),
+        w!("BUTTON"), w!("Seamless — follow sample rate, keep output at 24-bit"),
         WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(windows::Win32::UI::WindowsAndMessaging::BS_AUTORADIOBUTTON as u32) | WS_GROUP,
-        scale_val(38, scale), scale_val(128, scale), scale_val(415, scale), scale_val(20, scale), parent, Some(ID_RADIO_SEAMLESS), hinstance,
+        scale_val(38, scale), scale_val(144, scale), scale_val(415, scale), scale_val(20, scale), parent, Some(ID_RADIO_SEAMLESS), hinstance,
     );
     SendMessageW(radio_seamless, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
     SendMessageW(radio_seamless, BM_SETCHECK, WPARAM(chk_seamless), LPARAM(0));
 
     let radio_purist = create_ctrl(
-        w!("BUTTON"), w!("Purist (Strict - matches track sample rate and bit depth)"),
+        w!("BUTTON"), w!("Purist — follow sample rate and bit depth"),
         WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(windows::Win32::UI::WindowsAndMessaging::BS_AUTORADIOBUTTON as u32),
-        scale_val(38, scale), scale_val(150, scale), scale_val(415, scale), scale_val(20, scale), parent, Some(ID_RADIO_PURIST), hinstance,
+        scale_val(38, scale), scale_val(166, scale), scale_val(415, scale), scale_val(20, scale), parent, Some(ID_RADIO_PURIST), hinstance,
     );
     SendMessageW(radio_purist, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
     SendMessageW(radio_purist, BM_SETCHECK, WPARAM(chk_purist), LPARAM(0));
 
     let grp_pref = create_ctrl(
-        w!("BUTTON"), w!(" Preferences "),
-        WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(windows::Win32::UI::WindowsAndMessaging::BS_GROUPBOX as u32),
-        scale_val(24, scale), scale_val(184, scale), scale_val(441, scale), scale_val(68, scale), parent, None, hinstance,
+        w!("STATIC"), w!("Behavior"),
+        WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX),
+        scale_val(24, scale), scale_val(200, scale), scale_val(441, scale), scale_val(18, scale), parent, None, hinstance,
     );
-    SendMessageW(grp_pref, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
+    SendMessageW(grp_pref, WM_SETFONT, WPARAM(font_bold.0 as usize), LPARAM(1));
 
     let chk_always_on_top = create_ctrl(
-        w!("BUTTON"), w!("Always on Top"),
+        w!("BUTTON"), w!("Always on top"),
         WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(BS_AUTOCHECKBOX as u32),
-        scale_val(38, scale), scale_val(202, scale), scale_val(415, scale), scale_val(20, scale), parent, Some(ID_CHK_ALWAYS_ON_TOP), hinstance,
+        scale_val(38, scale), scale_val(218, scale), scale_val(415, scale), scale_val(20, scale), parent, Some(ID_CHK_ALWAYS_ON_TOP), hinstance,
     );
     SendMessageW(chk_always_on_top, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
     if saved_settings.is_always_on_top {
@@ -944,9 +1086,9 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
     }
 
     let chk_startup = create_ctrl(
-        w!("BUTTON"), w!("Run on Windows Startup (Minimizes to System Tray)"),
+        w!("BUTTON"), w!("Start with Windows · run in system tray"),
         WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(BS_AUTOCHECKBOX as u32),
-        scale_val(38, scale), scale_val(224, scale), scale_val(415, scale), scale_val(20, scale), parent, Some(ID_CHK_STARTUP), hinstance,
+        scale_val(38, scale), scale_val(240, scale), scale_val(415, scale), scale_val(20, scale), parent, Some(ID_CHK_STARTUP), hinstance,
     );
     SendMessageW(chk_startup, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
     if is_startup_enabled() {
@@ -954,37 +1096,40 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
     }
 
     let grp_delay = create_ctrl(
-        w!("BUTTON"), w!(" Settling Delay && Cache "),
-        WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(windows::Win32::UI::WindowsAndMessaging::BS_GROUPBOX as u32),
-        scale_val(24, scale), scale_val(258, scale), scale_val(441, scale), scale_val(80, scale), parent, None, hinstance,
+        w!("STATIC"), w!("Advanced"),
+        WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX),
+        scale_val(24, scale), scale_val(274, scale), scale_val(441, scale), scale_val(18, scale), parent, None, hinstance,
     );
-    SendMessageW(grp_delay, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
+    SendMessageW(grp_delay, WM_SETFONT, WPARAM(font_bold.0 as usize), LPARAM(1));
 
-    let delay_text = format!("DAC Delay: {} ms", saved_settings.settling_delay_ms);
+    let delay_text = format!("Settling delay: {} ms", saved_settings.settling_delay_ms);
     let wide_delay: Vec<u16> = delay_text.encode_utf16().chain(std::iter::once(0)).collect();
     let label_delay = create_ctrl(
         w!("STATIC"), PCWSTR::from_raw(wide_delay.as_ptr()),
         WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX),
-        scale_val(38, scale), scale_val(276, scale), scale_val(160, scale), scale_val(18, scale), parent, None, hinstance,
+        scale_val(38, scale), scale_val(292, scale), scale_val(160, scale), scale_val(18, scale), parent, None, hinstance,
     );
     SendMessageW(label_delay, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
 
     let trackbar_delay = create_ctrl(
         w!("msctls_trackbar32"), w!(""),
         WS_CHILD,
-        scale_val(38, scale), scale_val(298, scale), scale_val(270, scale), scale_val(24, scale), parent, Some(ID_DELAY_TRACKBAR), hinstance,
+        scale_val(38, scale), scale_val(314, scale), scale_val(270, scale), scale_val(24, scale), parent, Some(ID_DELAY_TRACKBAR), hinstance,
     );
     SendMessageW(trackbar_delay, TBM_SETRANGE, WPARAM(1), LPARAM(((800 << 16) | 50) as isize));
     SendMessageW(trackbar_delay, TBM_SETPOS, WPARAM(1), LPARAM(saved_settings.settling_delay_ms as isize));
 
     let btn_clear_cache = create_ctrl(
-        w!("BUTTON"), w!("Clear Cache"),
+        w!("BUTTON"), w!("Clear cache"),
         WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(windows::Win32::UI::WindowsAndMessaging::BS_PUSHBUTTON as u32),
-        scale_val(325, scale), scale_val(294, scale), scale_val(128, scale), scale_val(28, scale), parent, Some(ID_BTN_CLEAR_CACHE), hinstance,
+        scale_val(325, scale), scale_val(310, scale), scale_val(144, scale), scale_val(28, scale), parent, Some(ID_BTN_CLEAR_CACHE), hinstance,
     );
     SendMessageW(btn_clear_cache, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
 
+    let btn_about = create_ctrl(w!("BUTTON"), w!("About RateMatch"), WS_CHILD, scale_val(24, scale), scale_val(352, scale), scale_val(180, scale), scale_val(28, scale), parent, Some(401), hinstance);
+    SendMessageW(btn_about, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
     let tab1_controls = vec![
+        btn_about,
         grp_device,
         combo_devices,
         btn_refresh,
@@ -1002,7 +1147,7 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
 
     // Tab 2: About (hidden by default)
     let label_app_title = create_ctrl(
-        w!("STATIC"), w!("LosslessSwitcher For Apple Music"),
+        w!("STATIC"), w!("RateMatch"),
         WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX),
         scale_val(40, scale), scale_val(62, scale), scale_val(408, scale), scale_val(22, scale), parent, None, hinstance,
     );
@@ -1063,7 +1208,10 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
     );
     SendMessageW(btn_github, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
 
+    let btn_back = create_ctrl(w!("BUTTON"), w!("Back to settings"), WS_CHILD, scale_val(40, scale), scale_val(310, scale), scale_val(150, scale), scale_val(28, scale), parent, Some(402), hinstance);
+    SendMessageW(btn_back, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
     let tab2_controls = vec![
+        btn_back,
         label_app_title,
         label_app_version,
         label_app_desc,
@@ -1075,6 +1223,8 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
     ];
 
     let muted_labels = vec![
+        label_album,
+        label_device,
         label_app_version,
         label_app_optimized,
         label_app_disclaimer,
@@ -1083,6 +1233,10 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
     let title_labels = vec![
         label_app_title,
     ];
+
+    let mini_tooltip = CreateWindowExW(WINDOW_EX_STYLE(0), w!("tooltips_class32"), w!(""),
+        windows::Win32::UI::WindowsAndMessaging::WS_POPUP | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(3),
+        0, 0, 0, 0, parent, HMENU::default(), hinstance, None).unwrap();
 
     let mut kids: Vec<HWND> = Vec::new();
     let _ = windows::Win32::UI::WindowsAndMessaging::EnumChildWindows(
@@ -1117,9 +1271,18 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
             coordinator,
             font,
             font_bold,
+            font_artist,
             font_title,
             font_sub,
             tab_ctrl,
+            current_page: 0,
+            mini_mode: false,
+            normal_rect: RECT::default(),
+            mini_format,
+            mini_status,
+            mini_color: 0x0073665C,
+            mini_tooltip,
+            mini_tip: "Resolved source: —; output: —".encode_utf16().chain(Some(0)).collect(),
             tab0_controls,
             tab1_controls,
             tab2_controls,
@@ -1135,6 +1298,9 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
             ctrl_artwork,
             ctrl_logo,
             label_track,
+            label_artist,
+            label_album,
+            label_device,
             label_formats,
             label_status,
             cached_devices: Vec::new(),
@@ -1150,6 +1316,16 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
         });
     }
 
+    if let Ok(guard) = APP_STATE.lock() { if let Some(s) = guard.as_ref() {
+        let info = windows::Win32::UI::Controls::TTTOOLINFOW {
+            cbSize: std::mem::size_of::<windows::Win32::UI::Controls::TTTOOLINFOW>() as u32,
+            uFlags: windows::Win32::UI::Controls::TTF_IDISHWND | windows::Win32::UI::Controls::TTF_SUBCLASS,
+            hwnd: parent, uId: mini_format.0 as usize,
+            lpszText: windows::core::PWSTR(s.mini_tip.as_ptr() as *mut u16), ..Default::default()
+        };
+        SendMessageW(mini_tooltip, windows::Win32::UI::Controls::TTM_ADDTOOLW, WPARAM(0), LPARAM(&info as *const _ as isize));
+        SendMessageW(mini_tooltip, windows::Win32::UI::Controls::TTM_SETMAXTIPWIDTH, WPARAM(0), LPARAM(scale_val(360, scale) as isize));
+    } }
     refresh_device_list();
 }
 
@@ -1167,6 +1343,8 @@ unsafe fn create_ctrl(
         Some(val) => HMENU(val as *mut _),
         None => HMENU(std::ptr::null_mut()),
     };
+    let class_name = class.to_string().unwrap_or_default();
+    let style = if matches!(class_name.as_str(), "BUTTON" | "COMBOBOX" | "msctls_trackbar32") { style | windows::Win32::UI::WindowsAndMessaging::WS_TABSTOP } else { style };
     CreateWindowExW(
         WINDOW_EX_STYLE(0),
         class,
@@ -1255,6 +1433,21 @@ unsafe fn update_status_display() {
     if let Ok(mut guard) = APP_STATE.lock()
         && let Some(ref mut state) = *guard {
             let status = state.coordinator.get_status();
+            let (format, text, color) = super::mini::summary(&status);
+            set_window_text(state.mini_format, &format);
+            if state.mini_color != color { state.mini_color = color; let _ = InvalidateRect(state.mini_status, None, true); }
+            set_window_text(state.mini_status, &format!("● {}", text));
+            let detail = format!("Resolved source: {}. Output: {}. {}", status.target_format.map(|f| f.display_str()).unwrap_or_else(|| "Unknown".into()), status.current_device_format.map(|f| f.display_str()).unwrap_or_else(|| "Unavailable".into()), status.status_message);
+            let tip: Vec<u16> = detail.encode_utf16().chain(Some(0)).collect();
+            if state.mini_tip != tip {
+                state.mini_tip = tip;
+                let info = windows::Win32::UI::Controls::TTTOOLINFOW {
+                    cbSize: std::mem::size_of::<windows::Win32::UI::Controls::TTTOOLINFOW>() as u32,
+                    hwnd: state.main_hwnd, uId: state.mini_format.0 as usize,
+                    lpszText: windows::core::PWSTR(state.mini_tip.as_mut_ptr()), ..Default::default()
+                };
+                SendMessageW(state.mini_tooltip, windows::Win32::UI::Controls::TTM_UPDATETIPTEXTW, WPARAM(0), LPARAM(&info as *const _ as isize));
+            }
 
             // Update artwork if in-memory bytes changed
             let new_art_hash = status.artwork_bytes.as_ref().map(|b| hash_bytes(b));
@@ -1284,26 +1477,19 @@ unsafe fn update_status_display() {
                 );
             }
 
-            let track_text = match status.current_track {
-                Some(ref t) => {
-                    let clean_art = t.artist.split(['—', '–']).next().unwrap_or(&t.artist).trim();
-                    let display_title = if t.title.chars().count() > 38 {
-                        let tr: String = t.title.chars().take(35).collect();
-                        format!("{}...", tr.trim_end())
-                    } else {
-                        t.title.clone()
-                    };
-                    let full = format!("Track: {} - {}", clean_art, display_title);
-                    if full.chars().count() > 62 {
-                        let tr: String = full.chars().take(59).collect();
-                        format!("{}...", tr.trim_end())
-                    } else {
-                        full
-                    }
-                }
-                None => "Track: Waiting for Apple Music...".to_string(),
+            let (title, artist, album) = match status.current_track.as_ref() {
+                Some(t) => (t.title.as_str(), t.artist.as_str(), t.album.as_str()),
+                None => ("Ready when you are", "", "Play a song in Apple Music to begin."),
             };
-            set_window_text(state.label_track, &track_text);
+            set_window_text(state.label_track, title);
+            set_window_text(state.label_artist, artist);
+            set_window_text(state.label_album, album);
+            let device_index = SendMessageW(state.combo_devices, CB_GETCURSEL, WPARAM(0), LPARAM(0)).0;
+            let device = if device_index > 0 {
+                state.cached_devices.get(device_index as usize - 1).map(|d| d.name.as_str()).unwrap_or("Output unavailable")
+            } else { "Windows default output" };
+            let mode = match status.mode { SwitcherMode::Seamless => "Seamless", SwitcherMode::Purist => "Purist" };
+            set_window_text(state.label_device, &format!("{} · {}", mode, device));
 
             let target_str = if !status.is_lossless {
                 "AAC (Lossy)".to_string()
@@ -1311,17 +1497,11 @@ unsafe fn update_status_display() {
                 status.target_format.map(|f| f.display_str()).unwrap_or_else(|| "-".to_string())
             };
             let dev_str = status.current_device_format.map(|f| f.display_str()).unwrap_or_else(|| "-".to_string());
-            let fmt_text = format!("Source: {}\nDAC: {}", target_str, dev_str);
+            let fmt_text = format!("Resolved source: {}\r\nOutput: {}", target_str, dev_str);
             set_window_text(state.label_formats, &fmt_text);
 
-            let status_msg = if status.status_message.chars().count() > 56 {
-                let tr: String = status.status_message.chars().take(53).collect();
-                format!("{}...", tr.trim_end())
-            } else {
-                status.status_message.clone()
-            };
-            let status_text = format!("Status: {}", status_msg);
-            set_window_text(state.label_status, &status_text);
+            let status_text = &status.status_message;
+            set_window_text(state.label_status, status_text);
 
             if let Some(cur_fmt) = status.current_device_format
                 && !status.is_syncing && state.last_notified_fmt != Some(cur_fmt) {
@@ -1445,20 +1625,18 @@ unsafe fn create_default_artwork_bitmap(size: i32) -> HBITMAP {
     FillRect(hdc_mem, &rect, brush_bg);
     let _ = DeleteObject(brush_bg);
 
-    let pen = CreatePen(PS_SOLID, 1, COLORREF(0x004E443F));
-    let old_pen = SelectObject(hdc_mem, pen);
-    let _ = Rectangle(hdc_mem, 0, 0, size, size);
-    SelectObject(hdc_mem, old_pen);
-    let _ = DeleteObject(pen);
-
     SetBkMode(hdc_mem, TRANSPARENT);
     SetTextColor(hdc_mem, COLORREF(0x00908880));
+    let symbol_font = CreateFontW(-size / 3, 0, 0, 0, FW_NORMAL.0 as i32, 0, 0, 0, 0, 0, 0, 0, 0, w!("Segoe UI"));
+    let old_font = SelectObject(hdc_mem, symbol_font);
     let mut symbol = [0x266Au16];
     let top_y = (size as f32 * 0.3) as i32;
     let bot_y = (size as f32 * 0.7) as i32;
     let mut text_rect = RECT { left: 0, top: top_y, right: size, bottom: bot_y };
     DrawTextW(hdc_mem, &mut symbol, &mut text_rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
+    SelectObject(hdc_mem, old_font);
+    let _ = DeleteObject(symbol_font);
     SelectObject(hdc_mem, old_bmp);
     let _ = DeleteDC(hdc_mem);
     ReleaseDC(None, hdc_screen);
@@ -1516,7 +1694,7 @@ unsafe fn add_tray_icon(hwnd: HWND) {
         hIcon: app_icon,
         ..Default::default()
     };
-    let tip = w!("LosslessSwitcher For Apple Music");
+    let tip = w!("RateMatch");
     let tip_slice = tip.as_wide();
     let copy_len = tip_slice.len().min(nid.szTip.len() - 1);
     std::ptr::copy_nonoverlapping(tip_slice.as_ptr(), nid.szTip.as_mut_ptr(), copy_len);
@@ -1582,11 +1760,11 @@ unsafe fn show_tray_context_menu(hwnd: HWND) {
         .unwrap_or((SwitcherMode::Seamless, false));
     let is_startup = is_startup_enabled();
 
-    let _ = AppendMenuW(menu, MF_STRING, ID_TRAY_OPEN, w!("Open LosslessSwitcher For Apple Music"));
+    let _ = AppendMenuW(menu, MF_STRING, ID_TRAY_OPEN, w!("Open RateMatch"));
     let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
 
     let top_flag = if is_top { MF_CHECKED } else { MF_UNCHECKED };
-    let _ = AppendMenuW(menu, MF_STRING | top_flag, ID_TRAY_ALWAYS_ON_TOP, w!("Always on Top"));
+    let _ = AppendMenuW(menu, MF_STRING | top_flag, ID_TRAY_ALWAYS_ON_TOP, w!("Always on top"));
 
     let start_flag = if is_startup { MF_CHECKED } else { MF_UNCHECKED };
     let _ = AppendMenuW(menu, MF_STRING | start_flag, ID_TRAY_STARTUP, w!("Run on Startup"));

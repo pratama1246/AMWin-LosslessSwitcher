@@ -1,6 +1,6 @@
 [package]
 name = "lossless-switcher-am"
-version = "0.3.2"
+version = "0.3.4"
 edition = "2024"
 authors = ["Pratama Putra"]
 license = "GPL-3.0-only"

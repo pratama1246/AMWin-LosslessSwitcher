@@ -1,6 +1,6 @@
 <div align="center">
-  <img src="assets/logo.svg" width="130" height="130" alt="LosslessSwitcher For Apple Music Logo" />
-  <h1>LosslessSwitcher For Apple Music</h1>
+  <img src="assets/logo.svg" width="130" height="130" alt="RateMatch logo" />
+  <h1>RateMatch</h1>
   <p><b>Apple Music Audio Format Synchronizer for Windows</b></p>
   <p>Automatically adjusts the Windows audio output format based on the format reported by Apple Music playback metadata and local telemetry.</p>
 
@@ -15,11 +15,19 @@
 
 ---
 
+## Quick start
+
+Get a build from [Releases](https://github.com/pratama1246/AMWin-LosslessSwitcher/releases), run it, select the output in Settings, and play a track in Apple Music. Version 0.3.4 refers to the current source/build; it does not imply that a public release has already been published.
+
+[Code architecture](docs/ARCHITECTURE.md) · [Privacy](PRIVACY.md) · [Usage information](TERMS.md) · [Release notes](RELEASE_NOTES_v0.3.4.md)
+
 ## Overview
+
+RateMatch was previously named LosslessSwitcher For Apple Music. It currently supports Apple Music for Windows.
 
 Apple Music for Windows does not automatically change the Windows audio endpoint format to match each track's sample rate. The endpoint can therefore remain set to one static format while the Windows Audio Engine handles playback streams with different sample rates.
 
-**AMWin-LosslessSwitcher** is a lightweight Windows utility that monitors Apple Music playback and synchronizes the selected Windows audio endpoint format with the active track. It combines Windows System Media Transport Controls (SMTC), Apple Music Catalog metadata, and local Event Tracing for Windows (ETW) telemetry from Apple's playback agent (`AMPLibraryAgent.exe`).
+**RateMatch** is a lightweight Windows utility that monitors Apple Music playback and synchronizes the selected Windows audio endpoint format with the active track. It combines Windows System Media Transport Controls (SMTC), Apple Music Catalog metadata, and local Event Tracing for Windows (ETW) telemetry from Apple's playback agent (`AMPLibraryAgent.exe`).
 
 The application changes the Windows endpoint format only. It does not intercept, capture, re-encode, or otherwise modify the audio stream.
 
@@ -27,6 +35,23 @@ The application changes the Windows endpoint format only. It does not intercept,
   <img width="320" alt="LosslessSwitcher main window" src="https://github.com/user-attachments/assets/8c8e2c54-0a2f-43cc-afd9-5cb99100e0c1" />
   <img width="320" alt="LosslessSwitcher audio settings" src="https://github.com/user-attachments/assets/88edf31a-f9b1-4f50-b66b-91edb6d01d8a" />
 </div>
+
+## Mini mode
+
+Select Mini mode for a 480 × 88 always-on-top bar showing artwork, title, artist, album, output format, and status. Drag its background to move it. Use ↗ or Escape to return to the main window and restore its previous always-on-top preference. Mini mode and position are not persisted across restarts.
+
+| Status | Meaning |
+| --- | --- |
+| Idle | No current track |
+| Waiting for playback | Metadata is available; playback/sync is pending |
+| Switching… | Synchronization or a retry is in progress |
+| Format matched | Synchronized lossless source and output formats agree |
+| Rate synchronized | Output may intentionally differ in bit depth |
+| Limited by device | A supported fallback was applied |
+| AAC playback | The source is reported as lossy |
+| Output unavailable | Device initialization, availability, or support failed |
+
+Hover over the mini format for source/output details. These are metadata and endpoint values, not independent PCM measurements.
 
 ## Features
 
@@ -74,7 +99,7 @@ ETW telemetry describes format information reported by Apple's playback componen
 > [!IMPORTANT]
 > **Sample Rate Synchronization Is Not Bit-Perfect Playback**
 >
-> AMWin-LosslessSwitcher changes the Windows audio endpoint format to match the format resolved for the active track. This can help avoid sample-rate conversion by the Windows Audio Engine when the endpoint format matches the playback stream, but it does **not** guarantee bit-perfect output and does **not** enable Exclusive Mode.
+> RateMatch changes the Windows audio endpoint format to match the format resolved for the active track. This can help avoid sample-rate conversion by the Windows Audio Engine when the endpoint format matches the playback stream, but it does **not** guarantee bit-perfect output and does **not** enable Exclusive Mode.
 >
 > - Apple Music for Windows uses the **Windows Shared Audio Engine (WASAPI Shared)**.
 > - System volume, notification sounds, Windows audio enhancements, driver DSP, and other system-level processing may still affect or mix with audio playback.
@@ -84,7 +109,7 @@ ETW telemetry describes format information reported by Apple's playback componen
 
 ### Option A: Windows installer
 
-Download `AMWin-LosslessSwitcher-Setup-v0.3.2.exe` from [GitHub Releases](../../releases).
+Download `RateMatch-Setup-v0.3.4.exe` from [GitHub Releases](../../releases).
 
 The installer:
 - Installs the application under `%LOCALAPPDATA%\Programs\AMWin-LosslessSwitcher`.
@@ -94,7 +119,7 @@ The installer:
 
 ### Option B: Portable executable
 
-Download `AMWin-LosslessSwitcher-Portable-v0.3.2.exe` from [GitHub Releases](../../releases) and run it from a folder of your choice.
+Download `RateMatch-Portable-v0.3.4.exe` from [GitHub Releases](../../releases) and run it from a folder of your choice.
 
 To store settings and catalog cache files beside the executable, use `--portable` or create an empty `portable.dat` file in the same folder.
 
@@ -129,6 +154,8 @@ These settings are optional. They may help create a more consistent standard ste
 
 Available settings may vary by Apple Music and Windows version.
 
+The screenshots above show an older interface and are retained as historical illustrations.
+
 ## Known Limitations
 
 - **Shared Mode Only:** Apple Music for Windows does not provide WASAPI Exclusive Mode or ASIO output. Playback uses the Windows Shared Audio Engine.
@@ -155,6 +182,24 @@ This records the maintainer's test setup and does not guarantee compatibility wi
 | `--portable` | Stores settings and catalog cache files beside the executable. |
 
 ---
+
+## Code documentation
+
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the source map, thread/state ownership, mini-mode lifecycle, resource cleanup, compatibility identifiers, and validation workflow.
+
+```text
+src/
+  main.rs          Windows entry point
+  ui/              Main window, mini mode, tray and drawing
+  coordinator/     Monitoring and switching workflow
+  apple_music/     SMTC, catalog and ETW parsing
+  audio/           WASAPI endpoints and format application
+  config.rs        Preferences and storage selection
+assets/            Logo sources, PNG, ICO and icon generator
+docs/              Architecture and maintenance guide
+installer/         Inno Setup packaging
+tests/             Configuration and integration checks
+```
 
 ## Development
 
@@ -184,7 +229,7 @@ The main application source is under `src/`, with tests under `tests/`. The inst
 
 ## Privacy
 
-AMWin-LosslessSwitcher requests track-related metadata from public Apple services, including Apple Music Web and iTunes. Application settings and catalog cache are stored locally under `%APPDATA%\AMWin-LosslessSwitcher`, or beside the executable in portable mode.
+RateMatch requests track-related metadata from public Apple services, including Apple Music Web and iTunes. Application settings and catalog cache are stored locally under `%APPDATA%\AMWin-LosslessSwitcher`, or beside the executable in portable mode.
 
 This README does not make a zero-telemetry claim. Such a claim would require an audit of the application source and its dependencies for analytics, telemetry, crash reporting, and other outbound data.
 
