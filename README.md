@@ -1,6 +1,6 @@
 <div align="center">
-  <img src="assets/logo.svg" width="130" height="130" alt="RateMatch logo" />
-  <h1>RateMatch</h1>
+  <img src="assets/logo.svg" width="130" height="130" alt="RateAlign logo" />
+  <h1>RateAlign</h1>
   <p><b>Apple Music Audio Format Synchronizer for Windows</b></p>
   <p>Automatically adjusts the Windows audio output format based on the format reported by Apple Music playback metadata and local telemetry.</p>
 
@@ -17,17 +17,17 @@
 
 ## Quick start
 
-Get a build from [Releases](https://github.com/pratama1246/AMWin-LosslessSwitcher/releases), run it, select the output in Settings, and play a track in Apple Music. Version 0.3.4 refers to the current source/build; it does not imply that a public release has already been published.
+Get a build from [Releases](https://github.com/pratama1246/AMWin-LosslessSwitcher/releases), run it, select the output in Settings, and play a track in Apple Music. Version 0.3.5 refers to the current source/build; it does not imply that a public release has already been published.
 
-[Code architecture](docs/ARCHITECTURE.md) · [Privacy](PRIVACY.md) · [Usage information](TERMS.md) · [Release notes](RELEASE_NOTES_v0.3.4.md)
+[Code architecture](docs/ARCHITECTURE.md) · [Privacy](PRIVACY.md) · [Usage information](TERMS.md) · [Release notes](RELEASE_NOTES_v0.3.5.md)
 
 ## Overview
 
-RateMatch was previously named LosslessSwitcher For Apple Music. It currently supports Apple Music for Windows.
+RateAlign was previously named RateMatch (v0.3.4) and LosslessSwitcher For Apple Music. It currently supports Apple Music for Windows.
 
 Apple Music for Windows does not automatically change the Windows audio endpoint format to match each track's sample rate. The endpoint can therefore remain set to one static format while the Windows Audio Engine handles playback streams with different sample rates.
 
-**RateMatch** is a lightweight Windows utility that monitors Apple Music playback and synchronizes the selected Windows audio endpoint format with the active track. It combines Windows System Media Transport Controls (SMTC), Apple Music Catalog metadata, and local Event Tracing for Windows (ETW) telemetry from Apple's playback agent (`AMPLibraryAgent.exe`).
+**RateAlign** is a lightweight Windows utility that monitors Apple Music playback and synchronizes the selected Windows audio endpoint format with the active track. It combines Windows System Media Transport Controls (SMTC), Apple Music Catalog metadata, and local Event Tracing for Windows (ETW) telemetry from Apple's playback agent (`AMPLibraryAgent.exe`).
 
 The application changes the Windows endpoint format only. It does not intercept, capture, re-encode, or otherwise modify the audio stream.
 
@@ -35,6 +35,10 @@ The application changes the Windows endpoint format only. It does not intercept,
   <img width="320" alt="LosslessSwitcher main window" src="https://github.com/user-attachments/assets/8c8e2c54-0a2f-43cc-afd9-5cb99100e0c1" />
   <img width="320" alt="LosslessSwitcher audio settings" src="https://github.com/user-attachments/assets/88edf31a-f9b1-4f50-b66b-91edb6d01d8a" />
 </div>
+
+## Settings and About
+
+Settings separates device selection, switching modes, behavior and advanced actions. Test notification sends a preview without changing the output format. About contains the package version, project link, License and Privacy; packaged local documents open in Notepad, with a repository fallback when unavailable.
 
 ## Mini mode
 
@@ -99,7 +103,7 @@ ETW telemetry describes format information reported by Apple's playback componen
 > [!IMPORTANT]
 > **Sample Rate Synchronization Is Not Bit-Perfect Playback**
 >
-> RateMatch changes the Windows audio endpoint format to match the format resolved for the active track. This can help avoid sample-rate conversion by the Windows Audio Engine when the endpoint format matches the playback stream, but it does **not** guarantee bit-perfect output and does **not** enable Exclusive Mode.
+> RateAlign changes the Windows audio endpoint format to match the format resolved for the active track. This can help avoid sample-rate conversion by the Windows Audio Engine when the endpoint format matches the playback stream, but it does **not** guarantee bit-perfect output and does **not** enable Exclusive Mode.
 >
 > - Apple Music for Windows uses the **Windows Shared Audio Engine (WASAPI Shared)**.
 > - System volume, notification sounds, Windows audio enhancements, driver DSP, and other system-level processing may still affect or mix with audio playback.
@@ -109,7 +113,7 @@ ETW telemetry describes format information reported by Apple's playback componen
 
 ### Option A: Windows installer
 
-Download `RateMatch-Setup-v0.3.4.exe` from [GitHub Releases](../../releases).
+Download `RateAlign-Setup-v0.3.5.exe` from [GitHub Releases](../../releases).
 
 The installer:
 - Installs the application under `%LOCALAPPDATA%\Programs\AMWin-LosslessSwitcher`.
@@ -119,7 +123,7 @@ The installer:
 
 ### Option B: Portable executable
 
-Download `RateMatch-Portable-v0.3.4.exe` from [GitHub Releases](../../releases) and run it from a folder of your choice.
+Download `RateAlign-Portable-v0.3.5.exe` from [GitHub Releases](../../releases) and run it from a folder of your choice.
 
 To store settings and catalog cache files beside the executable, use `--portable` or create an empty `portable.dat` file in the same folder.
 
@@ -229,7 +233,7 @@ The main application source is under `src/`, with tests under `tests/`. The inst
 
 ## Privacy
 
-RateMatch requests track-related metadata from public Apple services, including Apple Music Web and iTunes. Application settings and catalog cache are stored locally under `%APPDATA%\AMWin-LosslessSwitcher`, or beside the executable in portable mode.
+RateAlign requests track-related metadata from public Apple services, including Apple Music Web and iTunes. Application settings and catalog cache are stored locally under `%APPDATA%\AMWin-LosslessSwitcher`, or beside the executable in portable mode.
 
 This README does not make a zero-telemetry claim. Such a claim would require an audit of the application source and its dependencies for analytics, telemetry, crash reporting, and other outbound data.
 

@@ -89,7 +89,7 @@ const TCN_FIRST: u32 = 0u32.wrapping_sub(550);
 const TCN_SELCHANGE: u32 = TCN_FIRST.wrapping_sub(1);
 
 const NIF_INFO: u32 = 0x00000010;
-const NIIF_INFO: u32 = 0x00000001;
+const NIIF_USER: u32 = 0x00000004;
 
 #[allow(non_camel_case_types, clippy::upper_case_acronyms)]
 #[repr(C)]
@@ -248,6 +248,8 @@ pub fn run_app() {
             windows::Win32::System::Com::COINIT_APARTMENTTHREADED,
         );
 
+        register_notification_identity();
+
         // Enable Per-Monitor V2 DPI awareness for crystal-clear multi-DPI scaling
         let _ = SetProcessDpiAwarenessContext(-4);
 
@@ -326,7 +328,7 @@ pub fn run_app() {
 
         let start_in_tray = std::env::args().any(|a| a == "--minimized" || a == "--tray");
 
-        let window_title = w!("RateMatch");
+        let window_title = w!("RateAlign");
         let hwnd = CreateWindowExW(
             WINDOW_EX_STYLE(0),
             class_name,
@@ -504,7 +506,7 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
         }
         windows::Win32::UI::WindowsAndMessaging::WM_DRAWITEM => {
             let item = &*(lparam.0 as *const windows::Win32::UI::Controls::DRAWITEMSTRUCT);
-            if matches!(item.CtlID, 403..=405) {
+            if item.CtlID == 405 || item.CtlType == windows::Win32::UI::Controls::ODT_BUTTON {
                 draw_surface(item);
                 return LRESULT(1);
             }
@@ -563,6 +565,9 @@ unsafe extern "system" fn wnd_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam:
                     let mini = APP_STATE.lock().ok().and_then(|g| g.as_ref().map(|s| s.mini_mode)).unwrap_or(false);
                     if mini { toggle_mini(hwnd); }
                 }
+                410 => show_native_notification(hwnd, "RateAlign", "Notification preview. Your output format has not been changed."),
+                408 => open_document(hwnd, "LICENSE"),
+                409 => open_document(hwnd, "PRIVACY.md"),
                 406 | 407 => toggle_mini(hwnd),
                 403 => show_page(hwnd, 0),
                 404 => show_page(hwnd, 1),
@@ -849,10 +854,14 @@ unsafe fn draw_surface(item: &windows::Win32::UI::Controls::DRAWITEMSTRUCT) {
     let scale = GetDpiForWindow(item.hwndItem).max(96) as f32 / 96.0;
     let panel = item.CtlID == 405;
     let active = (item.CtlID == 403 && state.current_page == 0) || (item.CtlID == 404 && state.current_page != 0);
-    let color = if panel { 0x002E2620 } else if active { 0x00EDE4DE } else { 0x00FFFFFF };
+    let navigation = matches!(item.CtlID, 403 | 404);
+    let pressed = item.itemState.0 & 0x0001 != 0;
+    let disabled = item.itemState.0 & 0x0004 != 0;
+    let color = if pressed { 0x00EDE4DE } else if panel { 0x002E2620 } else if active { 0x00EDE4DE } else { 0x00FFFFFF };
     FillRect(dc, &rc, get_bg_brush());
     let brush = CreateSolidBrush(COLORREF(color));
-    let pen = CreatePen(PS_SOLID, 1, COLORREF(color));
+    let border = if !panel && !navigation { 0x00DDD5CD } else { color };
+    let pen = CreatePen(PS_SOLID, 1, COLORREF(border));
     let old_brush = SelectObject(dc, brush);
     let old_pen = SelectObject(dc, pen);
     let radius = scale_val(12, scale);
@@ -883,8 +892,9 @@ unsafe fn draw_surface(item: &windows::Win32::UI::Controls::DRAWITEMSTRUCT) {
         }
     } else {
         SelectObject(dc, if active { state.font_bold } else { state.font });
-        SetTextColor(dc, COLORREF(if active { 0x00786B00 } else { 0x0073665C }));
+        SetTextColor(dc, COLORREF(if disabled { 0x009A9188 } else if active { 0x00786B00 } else if navigation { 0x0073665C } else { 0x002B2118 }));
         let mut text_rect = rc;
+        if pressed { text_rect.top += scale_val(1, scale); }
         let mut label: Vec<u16> = text.encode_utf16().collect();
         DrawTextW(dc, &mut label, &mut text_rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
         if item.itemState.0 & 0x0010 != 0 && item.itemState.0 & 0x0200 == 0 {
@@ -905,10 +915,15 @@ unsafe fn show_page(hwnd: HWND, page: usize) {
             let _ = InvalidateRect(button, None, true);
         }
     }
+    if page <= 2 {
+        let scale = GetDpiForWindow(hwnd).max(96) as f32 / 96.0;
+        let _ = SetWindowPos(hwnd, HWND::default(), 0, 0, scale_val(505, scale), scale_val(if page == 1 { 564 } else { 440 }, scale), SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+    }
     if let Some(pages) = pages {
         for (index, controls) in pages.iter().enumerate() {
             for &control in controls { let _ = ShowWindow(control, if index == page { SW_SHOW } else { SW_HIDE }); }
         }
+        if let Ok(button) = windows::Win32::UI::WindowsAndMessaging::GetDlgItem(hwnd, 406) { let _ = ShowWindow(button, if page == 0 { SW_SHOW } else { SW_HIDE }); }
         let _ = InvalidateRect(hwnd, None, true);
     }
 }
@@ -1019,28 +1034,28 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
     let grp_device = create_ctrl(
         w!("STATIC"), w!("Audio output"),
         WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX),
-        scale_val(24, scale), scale_val(60, scale), scale_val(441, scale), scale_val(18, scale), parent, None, hinstance,
+        scale_val(24, scale), scale_val(68, scale), scale_val(438, scale), scale_val(18, scale), parent, None, hinstance,
     );
     SendMessageW(grp_device, WM_SETFONT, WPARAM(font_bold.0 as usize), LPARAM(1));
 
     let combo_devices = create_ctrl(
         w!("COMBOBOX"), w!(""),
         WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(CBS_DROPDOWNLIST) | WS_GROUP,
-        scale_val(38, scale), scale_val(80, scale), scale_val(325, scale), scale_val(180, scale), parent, Some(ID_DEVICE_COMBO), hinstance,
+        scale_val(24, scale), scale_val(94, scale), scale_val(326, scale), scale_val(180, scale), parent, Some(ID_DEVICE_COMBO), hinstance,
     );
     SendMessageW(combo_devices, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
 
     let btn_refresh = create_ctrl(
         w!("BUTTON"), w!("Refresh"),
         WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(windows::Win32::UI::WindowsAndMessaging::BS_PUSHBUTTON as u32),
-        scale_val(373, scale), scale_val(79, scale), scale_val(80, scale), scale_val(26, scale), parent, Some(ID_BTN_REFRESH), hinstance,
+        scale_val(362, scale), scale_val(90, scale), scale_val(100, scale), scale_val(32, scale), parent, Some(ID_BTN_REFRESH), hinstance,
     );
     SendMessageW(btn_refresh, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
 
     let grp_mode = create_ctrl(
         w!("STATIC"), w!("Switching mode"),
         WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX),
-        scale_val(24, scale), scale_val(126, scale), scale_val(441, scale), scale_val(18, scale), parent, None, hinstance,
+        scale_val(24, scale), scale_val(148, scale), scale_val(438, scale), scale_val(18, scale), parent, None, hinstance,
     );
     SendMessageW(grp_mode, WM_SETFONT, WPARAM(font_bold.0 as usize), LPARAM(1));
 
@@ -1052,17 +1067,17 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
     };
 
     let radio_seamless = create_ctrl(
-        w!("BUTTON"), w!("Seamless — follow sample rate, keep output at 24-bit"),
+        w!("BUTTON"), w!("Seamless · Recommended"),
         WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(windows::Win32::UI::WindowsAndMessaging::BS_AUTORADIOBUTTON as u32) | WS_GROUP,
-        scale_val(38, scale), scale_val(144, scale), scale_val(415, scale), scale_val(20, scale), parent, Some(ID_RADIO_SEAMLESS), hinstance,
+        scale_val(24, scale), scale_val(176, scale), scale_val(438, scale), scale_val(20, scale), parent, Some(ID_RADIO_SEAMLESS), hinstance,
     );
     SendMessageW(radio_seamless, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
     SendMessageW(radio_seamless, BM_SETCHECK, WPARAM(chk_seamless), LPARAM(0));
 
     let radio_purist = create_ctrl(
-        w!("BUTTON"), w!("Purist — follow sample rate and bit depth"),
+        w!("BUTTON"), w!("Purist"),
         WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(windows::Win32::UI::WindowsAndMessaging::BS_AUTORADIOBUTTON as u32),
-        scale_val(38, scale), scale_val(166, scale), scale_val(415, scale), scale_val(20, scale), parent, Some(ID_RADIO_PURIST), hinstance,
+        scale_val(24, scale), scale_val(224, scale), scale_val(438, scale), scale_val(20, scale), parent, Some(ID_RADIO_PURIST), hinstance,
     );
     SendMessageW(radio_purist, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
     SendMessageW(radio_purist, BM_SETCHECK, WPARAM(chk_purist), LPARAM(0));
@@ -1070,14 +1085,14 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
     let grp_pref = create_ctrl(
         w!("STATIC"), w!("Behavior"),
         WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX),
-        scale_val(24, scale), scale_val(200, scale), scale_val(441, scale), scale_val(18, scale), parent, None, hinstance,
+        scale_val(24, scale), scale_val(284, scale), scale_val(438, scale), scale_val(18, scale), parent, None, hinstance,
     );
     SendMessageW(grp_pref, WM_SETFONT, WPARAM(font_bold.0 as usize), LPARAM(1));
 
     let chk_always_on_top = create_ctrl(
         w!("BUTTON"), w!("Always on top"),
         WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(BS_AUTOCHECKBOX as u32),
-        scale_val(38, scale), scale_val(218, scale), scale_val(415, scale), scale_val(20, scale), parent, Some(ID_CHK_ALWAYS_ON_TOP), hinstance,
+        scale_val(24, scale), scale_val(310, scale), scale_val(438, scale), scale_val(20, scale), parent, Some(ID_CHK_ALWAYS_ON_TOP), hinstance,
     );
     SendMessageW(chk_always_on_top, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
     if saved_settings.is_always_on_top {
@@ -1088,7 +1103,7 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
     let chk_startup = create_ctrl(
         w!("BUTTON"), w!("Start with Windows · run in system tray"),
         WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(BS_AUTOCHECKBOX as u32),
-        scale_val(38, scale), scale_val(240, scale), scale_val(415, scale), scale_val(20, scale), parent, Some(ID_CHK_STARTUP), hinstance,
+        scale_val(24, scale), scale_val(338, scale), scale_val(438, scale), scale_val(20, scale), parent, Some(ID_CHK_STARTUP), hinstance,
     );
     SendMessageW(chk_startup, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
     if is_startup_enabled() {
@@ -1098,7 +1113,7 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
     let grp_delay = create_ctrl(
         w!("STATIC"), w!("Advanced"),
         WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX),
-        scale_val(24, scale), scale_val(274, scale), scale_val(441, scale), scale_val(18, scale), parent, None, hinstance,
+        scale_val(24, scale), scale_val(380, scale), scale_val(438, scale), scale_val(18, scale), parent, None, hinstance,
     );
     SendMessageW(grp_delay, WM_SETFONT, WPARAM(font_bold.0 as usize), LPARAM(1));
 
@@ -1107,14 +1122,14 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
     let label_delay = create_ctrl(
         w!("STATIC"), PCWSTR::from_raw(wide_delay.as_ptr()),
         WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX),
-        scale_val(38, scale), scale_val(292, scale), scale_val(160, scale), scale_val(18, scale), parent, None, hinstance,
+        scale_val(24, scale), scale_val(406, scale), scale_val(256, scale), scale_val(18, scale), parent, None, hinstance,
     );
     SendMessageW(label_delay, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
 
     let trackbar_delay = create_ctrl(
         w!("msctls_trackbar32"), w!(""),
         WS_CHILD,
-        scale_val(38, scale), scale_val(314, scale), scale_val(270, scale), scale_val(24, scale), parent, Some(ID_DELAY_TRACKBAR), hinstance,
+        scale_val(24, scale), scale_val(432, scale), scale_val(294, scale), scale_val(24, scale), parent, Some(ID_DELAY_TRACKBAR), hinstance,
     );
     SendMessageW(trackbar_delay, TBM_SETRANGE, WPARAM(1), LPARAM(((800 << 16) | 50) as isize));
     SendMessageW(trackbar_delay, TBM_SETPOS, WPARAM(1), LPARAM(saved_settings.settling_delay_ms as isize));
@@ -1122,13 +1137,21 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
     let btn_clear_cache = create_ctrl(
         w!("BUTTON"), w!("Clear cache"),
         WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(windows::Win32::UI::WindowsAndMessaging::BS_PUSHBUTTON as u32),
-        scale_val(325, scale), scale_val(310, scale), scale_val(144, scale), scale_val(28, scale), parent, Some(ID_BTN_CLEAR_CACHE), hinstance,
+        scale_val(330, scale), scale_val(424, scale), scale_val(132, scale), scale_val(32, scale), parent, Some(ID_BTN_CLEAR_CACHE), hinstance,
     );
     SendMessageW(btn_clear_cache, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
 
-    let btn_about = create_ctrl(w!("BUTTON"), w!("About RateMatch"), WS_CHILD, scale_val(24, scale), scale_val(352, scale), scale_val(180, scale), scale_val(28, scale), parent, Some(401), hinstance);
+    let btn_about = create_ctrl(w!("BUTTON"), w!("About RateAlign"), WS_CHILD, scale_val(24, scale), scale_val(484, scale), scale_val(180, scale), scale_val(32, scale), parent, Some(401), hinstance);
     SendMessageW(btn_about, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
-    let tab1_controls = vec![
+    let desc_seamless = create_ctrl(w!("STATIC"), w!("Follow the sample rate; keep output at 24-bit."), WS_CHILD,
+        scale_val(44, scale), scale_val(200, scale), scale_val(418, scale), scale_val(18, scale), parent, None, hinstance);
+    let desc_purist = create_ctrl(w!("STATIC"), w!("Follow both the sample rate and source bit depth."), WS_CHILD,
+        scale_val(44, scale), scale_val(248, scale), scale_val(418, scale), scale_val(18, scale), parent, None, hinstance);
+    let btn_test = create_ctrl(w!("BUTTON"), w!("Test notification"), WS_CHILD,
+        scale_val(282, scale), scale_val(484, scale), scale_val(180, scale), scale_val(32, scale), parent, Some(410), hinstance);
+    for h in [desc_seamless, desc_purist] { SendMessageW(h, WM_SETFONT, WPARAM(font_sub.0 as usize), LPARAM(1)); }
+    SendMessageW(btn_test, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
+    let tab1_controls = vec![desc_seamless, desc_purist, btn_test,
         btn_about,
         grp_device,
         combo_devices,
@@ -1145,91 +1168,38 @@ unsafe fn init_gui(parent: HWND, coordinator: Arc<Coordinator>) {
         btn_clear_cache,
     ];
 
-    // Tab 2: About (hidden by default)
-    let label_app_title = create_ctrl(
-        w!("STATIC"), w!("RateMatch"),
-        WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX),
-        scale_val(40, scale), scale_val(62, scale), scale_val(408, scale), scale_val(22, scale), parent, None, hinstance,
-    );
-    SendMessageW(label_app_title, WM_SETFONT, WPARAM(font_title.0 as usize), LPARAM(1));
-
-    let version_text = format!("Version {} (Native 64-bit Windows)", env!("CARGO_PKG_VERSION"));
-    let wide_version: Vec<u16> = version_text.encode_utf16().chain(std::iter::once(0)).collect();
-    let label_app_version = create_ctrl(
-        w!("STATIC"), PCWSTR::from_raw(wide_version.as_ptr()),
-        WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX),
-        scale_val(40, scale), scale_val(86, scale), scale_val(408, scale), scale_val(16, scale), parent, None, hinstance,
-    );
-    SendMessageW(label_app_version, WM_SETFONT, WPARAM(font_sub.0 as usize), LPARAM(1));
-
-    let label_app_desc = create_ctrl(
-        w!("STATIC"), w!("Automatically synchronizes DAC sample rate with Apple Music on Windows to match track metadata."),
-        WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX),
-        scale_val(40, scale), scale_val(106, scale), scale_val(408, scale), scale_val(32, scale), parent, None, hinstance,
-    );
-    SendMessageW(label_app_desc, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
-
+    let btn_back = create_ctrl(w!("BUTTON"), w!("← Settings"), WS_CHILD,
+        scale_val(24, scale), scale_val(64, scale), scale_val(108, scale), scale_val(28, scale), parent, Some(402), hinstance);
     let logo_size = scale_val(48, scale);
     let logo_hbm = load_image_from_bytes(LOGO_PNG, logo_size);
-    let ctrl_logo = create_ctrl(
-        w!("STATIC"), w!(""),
-        WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_BITMAP),
-        scale_val(221, scale), scale_val(146, scale), logo_size, logo_size, parent, None, hinstance,
-    );
-    if let Some(hbm) = logo_hbm {
-        SendMessageW(ctrl_logo, STM_SETIMAGE, WPARAM(IMAGE_BITMAP), LPARAM(hbm.0 as isize));
+    let ctrl_logo = create_ctrl(w!("STATIC"), w!(""), WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_BITMAP),
+        scale_val(24, scale), scale_val(112, scale), logo_size, logo_size, parent, None, hinstance);
+    if let Some(hbm) = logo_hbm { SendMessageW(ctrl_logo, STM_SETIMAGE, WPARAM(IMAGE_BITMAP), LPARAM(hbm.0 as isize)); }
+    let label_app_title = create_ctrl(w!("STATIC"), w!("RateAlign"), WS_CHILD,
+        scale_val(88, scale), scale_val(112, scale), scale_val(360, scale), scale_val(28, scale), parent, None, hinstance);
+    let version_text = format!("Version {} · Windows x64", env!("CARGO_PKG_VERSION"));
+    let version_wide: Vec<u16> = version_text.encode_utf16().chain(Some(0)).collect();
+    let label_app_version = create_ctrl(w!("STATIC"), PCWSTR(version_wide.as_ptr()), WS_CHILD,
+        scale_val(88, scale), scale_val(144, scale), scale_val(360, scale), scale_val(20, scale), parent, None, hinstance);
+    let label_app_desc = create_ctrl(w!("STATIC"), w!("Automatically matches your output audio format to Apple Music track metadata."), WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX),
+        scale_val(24, scale), scale_val(188, scale), scale_val(438, scale), scale_val(40, scale), parent, None, hinstance);
+    let btn_github = create_ctrl(w!("BUTTON"), w!("GitHub"), WS_CHILD,
+        scale_val(24, scale), scale_val(244, scale), scale_val(100, scale), scale_val(30, scale), parent, Some(ID_BTN_GITHUB), hinstance);
+    let btn_license = create_ctrl(w!("BUTTON"), w!("License"), WS_CHILD,
+        scale_val(136, scale), scale_val(244, scale), scale_val(100, scale), scale_val(30, scale), parent, Some(408), hinstance);
+    let btn_privacy = create_ctrl(w!("BUTTON"), w!("Privacy"), WS_CHILD,
+        scale_val(248, scale), scale_val(244, scale), scale_val(100, scale), scale_val(30, scale), parent, Some(409), hinstance);
+    let label_app_copyright = create_ctrl(w!("STATIC"), w!("Developed by Pratama Putra\r\n© 2026 · GPL-3.0-only"), WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX),
+        scale_val(24, scale), scale_val(300, scale), scale_val(438, scale), scale_val(36, scale), parent, None, hinstance);
+    let label_app_disclaimer = create_ctrl(w!("STATIC"), w!("Not affiliated with Apple Inc."), WS_CHILD,
+        scale_val(24, scale), scale_val(352, scale), scale_val(438, scale), scale_val(20, scale), parent, None, hinstance);
+    for h in [btn_back, label_app_desc, btn_github, btn_license, btn_privacy, label_app_copyright] {
+        SendMessageW(h, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
     }
-
-    let label_app_optimized = create_ctrl(
-        w!("STATIC"), w!("Optimized for Apple Music for Windows"),
-        WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX),
-        scale_val(40, scale), scale_val(202, scale), scale_val(408, scale), scale_val(16, scale), parent, None, hinstance,
-    );
-    SendMessageW(label_app_optimized, WM_SETFONT, WPARAM(font_sub.0 as usize), LPARAM(1));
-
-    let label_app_disclaimer = create_ctrl(
-        w!("STATIC"), w!("Not affiliated with Apple Inc."),
-        WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX),
-        scale_val(40, scale), scale_val(220, scale), scale_val(408, scale), scale_val(16, scale), parent, None, hinstance,
-    );
-    SendMessageW(label_app_disclaimer, WM_SETFONT, WPARAM(font_sub.0 as usize), LPARAM(1));
-
-    let label_app_copyright = create_ctrl(
-        w!("STATIC"), w!("Developed by Pratama Putra © 2026. All rights reserved."),
-        WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(SS_NOPREFIX),
-        scale_val(40, scale), scale_val(238, scale), scale_val(408, scale), scale_val(16, scale), parent, None, hinstance,
-    );
-    SendMessageW(label_app_copyright, WM_SETFONT, WPARAM(font_sub.0 as usize), LPARAM(1));
-
-    let btn_github = create_ctrl(
-        w!("BUTTON"), w!("GitHub"),
-        WS_CHILD | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(windows::Win32::UI::WindowsAndMessaging::BS_PUSHBUTTON as u32),
-        scale_val(40, scale), scale_val(258, scale), scale_val(105, scale), scale_val(28, scale), parent, Some(ID_BTN_GITHUB), hinstance,
-    );
-    SendMessageW(btn_github, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
-
-    let btn_back = create_ctrl(w!("BUTTON"), w!("Back to settings"), WS_CHILD, scale_val(40, scale), scale_val(310, scale), scale_val(150, scale), scale_val(28, scale), parent, Some(402), hinstance);
-    SendMessageW(btn_back, WM_SETFONT, WPARAM(font.0 as usize), LPARAM(1));
-    let tab2_controls = vec![
-        btn_back,
-        label_app_title,
-        label_app_version,
-        label_app_desc,
-        ctrl_logo,
-        label_app_optimized,
-        label_app_disclaimer,
-        label_app_copyright,
-        btn_github,
-    ];
-
-    let muted_labels = vec![
-        label_album,
-        label_device,
-        label_app_version,
-        label_app_optimized,
-        label_app_disclaimer,
-        label_app_copyright,
-    ];
+    for h in [label_app_version, label_app_disclaimer] { SendMessageW(h, WM_SETFONT, WPARAM(font_sub.0 as usize), LPARAM(1)); }
+    SendMessageW(label_app_title, WM_SETFONT, WPARAM(font_title.0 as usize), LPARAM(1));
+    let tab2_controls = vec![btn_back, ctrl_logo, label_app_title, label_app_version, label_app_desc, btn_github, btn_license, btn_privacy, label_app_copyright, label_app_disclaimer];
+    let muted_labels = vec![desc_seamless, desc_purist, label_album, label_device, label_app_version, label_app_disclaimer, label_app_copyright];
     let title_labels = vec![
         label_app_title,
     ];
@@ -1344,6 +1314,9 @@ unsafe fn create_ctrl(
         None => HMENU(std::ptr::null_mut()),
     };
     let class_name = class.to_string().unwrap_or_default();
+    let push_button = class_name == "BUTTON" && style.0 & 0x0F == 0;
+    let style = if push_button { style | windows::Win32::UI::WindowsAndMessaging::WINDOW_STYLE(0x000B) } else { style };
+    let h = if push_button && id != Some(407) { scale_val(32, GetDpiForWindow(parent).max(96) as f32 / 96.0) } else { h };
     let style = if matches!(class_name.as_str(), "BUTTON" | "COMBOBOX" | "msctls_trackbar32") { style | windows::Win32::UI::WindowsAndMessaging::WS_TABSTOP } else { style };
     CreateWindowExW(
         WINDOW_EX_STYLE(0),
@@ -1515,7 +1488,7 @@ unsafe fn update_status_display() {
                         };
                         show_native_notification(
                             state.main_hwnd,
-                            "DAC Format Switched",
+                            "RateAlign — Output format changed",
                             &note_msg,
                         );
                     }
@@ -1524,13 +1497,40 @@ unsafe fn update_status_display() {
         }
 }
 
+unsafe fn open_document(hwnd: HWND, filename: &str) {
+    let local = std::env::current_exe().ok().and_then(|p| p.parent().map(|dir| dir.join(filename))).filter(|p| p.is_file());
+    if let Some(path) = local {
+        let argument: Vec<u16> = format!("\"{}\"", path.display()).encode_utf16().chain(Some(0)).collect();
+        let result = ShellExecuteW(hwnd, w!("open"), w!("notepad.exe"), PCWSTR(argument.as_ptr()), PCWSTR::null(), SW_SHOWNORMAL);
+        if result.0 as isize > 32 { return; }
+    }
+    let target = format!("https://github.com/pratama1246/AMWin-LosslessSwitcher/blob/main/{}", filename);
+    let wide: Vec<u16> = target.encode_utf16().chain(Some(0)).collect();
+    let _ = ShellExecuteW(hwnd, w!("open"), PCWSTR(wide.as_ptr()), PCWSTR::null(), PCWSTR::null(), SW_SHOWNORMAL);
+}
+
+unsafe fn register_notification_identity() {
+    use windows::Win32::System::Registry::{RegCreateKeyExW, REG_OPTION_NON_VOLATILE};
+    let _ = windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(w!("PratamaPutra.RateAlign"));
+    let mut key = HKEY::default();
+    if RegCreateKeyExW(HKEY_CURRENT_USER, w!("Software\\Classes\\AppUserModelId\\PratamaPutra.RateAlign"), 0, PCWSTR::null(), REG_OPTION_NON_VOLATILE, KEY_WRITE, None, &mut key, None).is_err() { return; }
+    for (name, value) in [(w!("DisplayName"), "RateAlign".to_string()), (w!("IconUri"), std::env::current_exe().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default())] {
+        if value.is_empty() { continue; }
+        let wide: Vec<u16> = value.encode_utf16().chain(Some(0)).collect();
+        let bytes = std::slice::from_raw_parts(wide.as_ptr() as *const u8, wide.len() * 2);
+        let _ = RegSetValueExW(key, name, 0, REG_SZ, Some(bytes));
+    }
+    let _ = RegCloseKey(key);
+}
+
 unsafe fn show_native_notification(hwnd: HWND, title: &str, message: &str) {
     let mut nid = NOTIFYICONDATAW {
         cbSize: std::mem::size_of::<NOTIFYICONDATAW>() as u32,
         hWnd: hwnd,
         uID: 1,
         uFlags: NOTIFY_ICON_DATA_FLAGS(NIF_INFO),
-        dwInfoFlags: NOTIFY_ICON_INFOTIP_FLAGS(NIIF_INFO),
+        dwInfoFlags: NOTIFY_ICON_INFOTIP_FLAGS(NIIF_USER),
+        hBalloonIcon: windows::Win32::System::LibraryLoader::GetModuleHandleW(None).ok().and_then(|module| LoadIconW(module, PCWSTR(1 as _)).ok()).unwrap_or_default(),
         ..Default::default()
     };
     let w_title: Vec<u16> = title.encode_utf16().chain(std::iter::once(0)).collect();
@@ -1694,7 +1694,7 @@ unsafe fn add_tray_icon(hwnd: HWND) {
         hIcon: app_icon,
         ..Default::default()
     };
-    let tip = w!("RateMatch");
+    let tip = w!("RateAlign");
     let tip_slice = tip.as_wide();
     let copy_len = tip_slice.len().min(nid.szTip.len() - 1);
     std::ptr::copy_nonoverlapping(tip_slice.as_ptr(), nid.szTip.as_mut_ptr(), copy_len);
@@ -1760,7 +1760,7 @@ unsafe fn show_tray_context_menu(hwnd: HWND) {
         .unwrap_or((SwitcherMode::Seamless, false));
     let is_startup = is_startup_enabled();
 
-    let _ = AppendMenuW(menu, MF_STRING, ID_TRAY_OPEN, w!("Open RateMatch"));
+    let _ = AppendMenuW(menu, MF_STRING, ID_TRAY_OPEN, w!("Open RateAlign"));
     let _ = AppendMenuW(menu, MF_SEPARATOR, 0, PCWSTR::null());
 
     let top_flag = if is_top { MF_CHECKED } else { MF_UNCHECKED };

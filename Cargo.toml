@@ -1,6 +1,6 @@
 [package]
 name = "lossless-switcher-am"
-version = "0.3.4"
+version = "0.3.5"
 edition = "2024"
 authors = ["Pratama Putra"]
 license = "GPL-3.0-only"
@@ -11,7 +11,7 @@ name = "lossless_switcher_am"
 path = "src/lib.rs"
 
 [[bin]]
-name = "lossless-switcher-am"
+name = "RateAlign"
 path = "src/main.rs"
 
 [dependencies]

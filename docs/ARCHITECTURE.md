@@ -1,6 +1,6 @@
-# RateMatch architecture
+# RateAlign architecture
 
-Applies to v0.3.4. The application uses Rust, Win32 controls, and GDI/GDI+ rendering. It does not host a web UI.
+Applies to v0.3.5. The application uses Rust, Win32 controls, and GDI/GDI+ rendering. It does not host a web UI.
 
 ## Code map
 
@@ -54,9 +54,17 @@ mini::summary is presentation-only. Errors and switching take precedence over co
 
 WindowState owns font and bitmap handles. Changed artwork replaces and deletes the previous bitmap. DPI changes rebuild and release graphics resources. WM_DESTROY removes the tray icon, shuts down the coordinator, attempts to restore captured device formats, and releases graphics handles. Child windows and tooltip are destroyed with the parent.
 
+## Settings and About
+
+Settings uses a taller layout with separate descriptions for the two switching modes. The main and About pages return to the compact window size. Push buttons share the owner-draw renderer; radio buttons, checkboxes, dropdowns and sliders keep native behavior. Test notification is a UI-only check and does not change endpoint formats. License/Privacy actions prefer packaged local files and fall back to repository links.
+
+## Notification identity
+
+At startup the app sets PratamaPutra.RateAlign as its process AppUserModelID and registers DisplayName/IconUri under the current user’s Software/Classes/AppUserModelId key. The executable includes RateAlign VERSIONINFO metadata. Installer shortcuts use the same AppUserModelID. The existing tray notification mechanism remains Shell_NotifyIconW; verify actual Windows sender attribution rather than inferring it from the message title.
+
 ## Compatibility identifiers
 
-RateMatch is the user-facing name. Cargo package/binary names, mutex, window class, startup registry value, installer AppId and historical storage path remain unchanged to avoid breaking upgrades and preferences. Renaming these requires a migration.
+RateAlign is the user-facing name and the executable is RateAlign.exe. The Cargo library/package name, mutex, window class, startup registry value, installer AppId and historical storage path remain unchanged to avoid breaking upgrades and preferences. Renaming these requires a migration.
 
 ## Development and verification
 

@@ -1,10 +1,10 @@
-; Inno Setup Script for RateMatch
-#define MyAppName "RateMatch"
+; Inno Setup Script for RateAlign
+#define MyAppName "RateAlign"
 #define MyAppShortName "AMWin-LosslessSwitcher"
-#define MyAppVersion "0.3.4"
+#define MyAppVersion "0.3.5"
 #define MyAppPublisher "Pratama Putra"
 #define MyAppURL "https://github.com/pratama1246/AMWin-LosslessSwitcher"
-#define MyAppExeName "lossless-switcher-am.exe"
+#define MyAppExeName "RateAlign.exe"
 
 [Setup]
 AppId={{9F5B2F17-8D2A-4D3C-B974-91E3618D3C89}
@@ -19,7 +19,7 @@ DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
 LicenseFile=..\LICENSE
 OutputDir=..\dist
-OutputBaseFilename=RateMatch-Setup-v{#MyAppVersion}
+OutputBaseFilename=RateAlign-Setup-v{#MyAppVersion}
 SetupIconFile=..\assets\app.ico
 Compression=lzma2/ultra64
 SolidCompression=yes
@@ -58,10 +58,10 @@ Source: "..\PRIVACY.md"; DestDir: "{app}"; Flags: ignoreversion
 Source: "..\TERMS.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\app.ico"
+Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\app.ico"; AppUserModelID: "PratamaPutra.RateAlign"
 Name: "{group}\{cm:UninstallProgram,{#MyAppName}}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\app.ico"; Tasks: desktopicon
-Name: "{userstartup}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--minimized"; IconFilename: "{app}\app.ico"; Tasks: startupicon
+Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; IconFilename: "{app}\app.ico"; AppUserModelID: "PratamaPutra.RateAlign"; Tasks: desktopicon
+Name: "{userstartup}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Parameters: "--minimized"; IconFilename: "{app}\app.ico"; AppUserModelID: "PratamaPutra.RateAlign"; Tasks: startupicon
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
@@ -72,6 +72,7 @@ var
   ResultCode: Integer;
 begin
   // Terminate any running instance of the app before installing
+  Exec('taskkill.exe', '/F /IM {#MyAppExeName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec('taskkill.exe', '/F /IM lossless-switcher-am.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Result := True;
 end;
@@ -92,6 +93,7 @@ var
   ResultCode: Integer;
 begin
   // Terminate any running instance of the app before uninstalling
+  Exec('taskkill.exe', '/F /IM {#MyAppExeName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Exec('taskkill.exe', '/F /IM lossless-switcher-am.exe', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Result := True;
 end;

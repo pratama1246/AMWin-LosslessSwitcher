@@ -20,7 +20,7 @@ function New-RoundedRectangle {
     return $path
 }
 
-function Render-RateMatchLogo {
+function Render-RateAlignLogo {
     param([int]$size)
     $bmp = New-Object System.Drawing.Bitmap($size, $size, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
     $g = [System.Drawing.Graphics]::FromImage($bmp)
@@ -31,24 +31,19 @@ function Render-RateMatchLogo {
     $white = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::White)
     $teal = [System.Drawing.SolidBrush]::new([System.Drawing.Color]::FromArgb(0, 107, 120))
     $g.FillPath($white, $tile)
-    $mark = [System.Drawing.Drawing2D.GraphicsPath]::new()
-    $mark.AddLine(386, 112, 226, 112)
-    $mark.AddBezier(226,112,204,112,188,120,176,140)
-    $mark.AddLine(176,140,106,246)
-    $mark.AddBezier(106,246,94,268,110,290,142,290)
-    $mark.AddLine(142,290,226,290)
-    $mark.AddLine(226,290,266,230)
-    $mark.AddLine(266,230,174,230)
-    $mark.AddLine(174,230,222,166)
-    $mark.AddLine(222,166,350,166)
-    $mark.CloseFigure()
-    $g.FillPath($teal, $mark)
-    $rotation = [System.Drawing.Drawing2D.Matrix]::new()
-    $rotation.RotateAt(180, [System.Drawing.PointF]::new(256,256))
-    $mark.Transform($rotation)
-    $g.FillPath($teal, $mark)
-    $rotation.Dispose()
-    $mark.Dispose()
+    $graphite = [System.Drawing.Pen]::new([System.Drawing.Color]::FromArgb(32, 38, 46), 48)
+    $signal = [System.Drawing.Pen]::new([System.Drawing.Color]::FromArgb(0, 107, 120), 48)
+    foreach ($pen in @($signal, $graphite)) {
+        $pen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
+        $pen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
+        $pen.LineJoin = [System.Drawing.Drawing2D.LineJoin]::Round
+    }
+    $upper = [System.Drawing.PointF[]]@([System.Drawing.PointF]::new(112,132), [System.Drawing.PointF]::new(256,132), [System.Drawing.PointF]::new(256,216), [System.Drawing.PointF]::new(400,216))
+    $lower = [System.Drawing.PointF[]]@([System.Drawing.PointF]::new(112,380), [System.Drawing.PointF]::new(256,380), [System.Drawing.PointF]::new(256,296), [System.Drawing.PointF]::new(400,296))
+    $g.DrawLines($signal, $upper)
+    $g.DrawLines($graphite, $lower)
+    $signal.Dispose()
+    $graphite.Dispose()
     $tile.Dispose()
     $white.Dispose()
     $teal.Dispose()
@@ -60,7 +55,7 @@ $sizes = @(16, 24, 32, 48, 64, 128, 256)
 $images = @()
 
 foreach ($s in $sizes) {
-    $bmp = Render-RateMatchLogo $s
+    $bmp = Render-RateAlignLogo $s
     $ms = New-Object System.IO.MemoryStream
     $bmp.Save($ms, [System.Drawing.Imaging.ImageFormat]::Png)
     $images += [PSCustomObject]@{
@@ -107,4 +102,4 @@ $bw.Flush()
 $bw.Close()
 $fs.Close()
 
-Write-Output "Successfully generated RateMatch assets\logo.png and assets\app.ico!"
+Write-Output "Successfully generated RateAlign assets\logo.png and assets\app.ico!"

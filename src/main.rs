@@ -1,4 +1,4 @@
-//! LosslessSwitcher for Apple Music (Windows x64)
+//! RateAlign (Windows x64)
 //! Developed by Pratama Putra (https://github.com/pratama1246/AMWin-LosslessSwitcher)
 //!
 //! Inspired by Vincent Neo (LosslessSwitcher for macOS) and Jordan Gibson (WindowsLosslessSwitcher).

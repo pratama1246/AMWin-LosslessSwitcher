@@ -1,5 +1,5 @@
 ================================================================================
-  LosslessSwitcher For Apple Music (Windows x64) - Version 0.3.0
+  RateAlign (Windows x64) - Version 0.3.5
 ================================================================================
   Author  : Pratama Putra
   GitHub  : https://github.com/pratama1246/AMWin-LosslessSwitcher
@@ -7,7 +7,7 @@
 ================================================================================
 
 [OVERVIEW]
-LosslessSwitcher For Apple Music (AMWin-LosslessSwitcher) is a lightweight,
+RateAlign (AMWin-LosslessSwitcher) is a lightweight,
 native Windows 64-bit utility that monitors Apple Music playback and
 automatically synchronizes your selected Windows audio endpoint format
 (DAC sample rate) with the currently playing track.

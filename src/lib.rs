@@ -1,4 +1,4 @@
-//! LosslessSwitcher for Apple Music
+//! RateAlign
 //! Developed by Pratama Putra (https://github.com/pratama1246/AMWin-LosslessSwitcher)
 
 pub mod audio;
